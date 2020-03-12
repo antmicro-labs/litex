@@ -15,6 +15,8 @@ from litex.soc.cores.clock import *
 from litex.soc.integration.soc_core import *
 from litex.soc.integration.soc_sdram import *
 from litex.soc.integration.builder import *
+from litex.soc.cores.i2s import *
+from litex.soc.cores import gpio
 
 from litedram.modules import MT41K128M16
 from litedram.phy import s7ddrphy
@@ -24,29 +26,42 @@ from liteeth.phy.mii import LiteEthPHYMII
 # CRG ----------------------------------------------------------------------------------------------
 
 class _CRG(Module):
-    def __init__(self, platform, sys_clk_freq):
+    def __init__(self, platform, sys_clk_freq, i2s_rx_freq, i2s_tx_freq):
         self.clock_domains.cd_sys       = ClockDomain()
         self.clock_domains.cd_sys2x     = ClockDomain(reset_less=True)
         self.clock_domains.cd_sys4x     = ClockDomain(reset_less=True)
         self.clock_domains.cd_sys4x_dqs = ClockDomain(reset_less=True)
         self.clock_domains.cd_clk200    = ClockDomain()
         self.clock_domains.cd_eth       = ClockDomain()
+        self.clock_domains.cd_i2s_rx    = ClockDomain()
+        self.clock_domains.cd_i2s_tx    = ClockDomain()
 
         # # #
 
         self.submodules.pll = pll = S7PLL(speedgrade=-1)
-        self.comb += pll.reset.eq(~platform.request("cpu_reset"))
-        pll.register_clkin(platform.request("clk100"), 100e6)
+        self.submodules.pll2 = pll2 = S7PLL(speedgrade=-1)
+
+        cpu_reset = ~platform.request("cpu_reset")
+        clk100 = platform.request("clk100")
+        self.comb += pll.reset.eq(cpu_reset)
+        pll.register_clkin(clk100, 100e6)
+        self.comb += pll2.reset.eq(cpu_reset)
+        pll2.register_clkin(clk100, 100e6)
+
         pll.create_clkout(self.cd_sys,       sys_clk_freq)
         pll.create_clkout(self.cd_sys2x,     2*sys_clk_freq)
         pll.create_clkout(self.cd_sys4x,     4*sys_clk_freq)
         pll.create_clkout(self.cd_sys4x_dqs, 4*sys_clk_freq, phase=90)
         pll.create_clkout(self.cd_clk200,    200e6)
         pll.create_clkout(self.cd_eth,       25e6)
+        pll2.create_clkout(self.cd_i2s_rx,   i2s_rx_freq)
+        pll2.create_clkout(self.cd_i2s_tx,   i2s_tx_freq)
 
         self.submodules.idelayctrl = S7IDELAYCTRL(self.cd_clk200)
 
         self.comb += platform.request("eth_ref_clk").eq(self.cd_eth.clk)
+        self.comb += platform.request("i2s_rx_mclk").eq(self.cd_i2s_rx.clk)
+        self.comb += platform.request("i2s_tx_mclk").eq(self.cd_i2s_tx.clk)
 
 # BaseSoC ------------------------------------------------------------------------------------------
 
@@ -58,7 +73,7 @@ class BaseSoC(SoCCore):
         SoCCore.__init__(self, platform, clk_freq=sys_clk_freq, **kwargs)
 
         # CRG --------------------------------------------------------------------------------------
-        self.submodules.crg = _CRG(platform, sys_clk_freq)
+        self.submodules.crg = _CRG(platform, sys_clk_freq, kwargs["i2s_rx_freq"], kwargs["i2s_tx_freq"])
 
         # DDR3 SDRAM -------------------------------------------------------------------------------
         if not self.integrated_main_ram_size:
@@ -94,6 +109,42 @@ class BaseSoC(SoCCore):
             self.add_csr("ethphy")
             self.add_etherbone(phy=self.ethphy)
 
+# SoundSoC --------------------------------------------------------------------------------------
+
+class SoundSoC(BaseSoC):
+    mem_map = {
+        "i2s_rx": 0xb1000000,
+        "i2s_tx": 0xb2000000
+    }
+    mem_map.update(BaseSoC.mem_map)
+    def __init__(self,  **kwargs):
+        BaseSoC.__init__(self, **kwargs)
+        # I2S --------------------------------------------------------------------------------------
+        i2s_mem_size=0x40000;
+        # i2s rx
+        self.submodules.i2s_rx = S7I2S(
+            pads=self.platform.request("i2s_rx"),
+            sample_width=24,
+            frame_format=I2S_FORMAT.I2S_STANDARD,
+            concatenate_channels=False
+        )
+        self.add_memory_region("i2s_rx", self.mem_map["i2s_rx"], i2s_mem_size);
+        self.add_wb_slave(self.mem_regions["i2s_rx"].origin, self.i2s_rx.bus, i2s_mem_size)
+        self.add_csr("i2s_rx")
+        self.add_interrupt("i2s_rx")
+        # i2s tx
+        self.submodules.i2s_tx = S7I2S(
+            pads=self.platform.request("i2s_tx"),
+            sample_width=24,
+            frame_format=I2S_FORMAT.I2S_STANDARD,
+            master=True,
+            concatenate_channels=False
+        )
+        self.add_memory_region("i2s_tx", self.mem_map["i2s_tx"], i2s_mem_size);
+        self.add_wb_slave(self.mem_regions["i2s_tx"].origin, self.i2s_tx.bus, i2s_mem_size)
+        self.add_csr("i2s_tx")
+        self.add_interrupt("i2s_tx")
+
 # Build --------------------------------------------------------------------------------------------
 
 def main():
@@ -108,8 +159,8 @@ def main():
     args = parser.parse_args()
 
     assert not (args.with_ethernet and args.with_etherbone)
-    soc = BaseSoC(with_ethernet=args.with_ethernet, with_etherbone=args.with_etherbone,
-        **soc_sdram_argdict(args))
+    soc = SoundSoC(with_ethernet=args.with_ethernet, with_etherbone=args.with_etherbone,
+       i2s_rx_freq=11.289e6, i2s_tx_freq=22.579e6, **soc_sdram_argdict(args))
     builder = Builder(soc, **builder_argdict(args))
     builder.build(**vivado_build_argdict(args), run=args.build)
 
