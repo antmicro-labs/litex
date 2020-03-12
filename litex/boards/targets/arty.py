@@ -13,6 +13,8 @@ from litex.build.xilinx.vivado import vivado_build_args, vivado_build_argdict
 from litex.soc.cores.clock import *
 from litex.soc.integration.soc_sdram import *
 from litex.soc.integration.builder import *
+from litex.soc.cores.i2s import *
+from litex.soc.cores import gpio
 
 from litedram.modules import MT41K128M16
 from litedram.phy import s7ddrphy
@@ -29,21 +31,31 @@ class _CRG(Module):
         self.clock_domains.cd_sys4x_dqs = ClockDomain(reset_less=True)
         self.clock_domains.cd_clk200    = ClockDomain()
         self.clock_domains.cd_eth       = ClockDomain()
+        self.clock_domains.cd_i2s       = ClockDomain()
+        self.clock_domains.cd_i2s_lrck  = ClockDomain()
 
         # # #
 
         self.submodules.pll = pll = S7PLL(speedgrade=-1)
-        self.comb += pll.reset.eq(~platform.request("cpu_reset"))
-        pll.register_clkin(platform.request("clk100"), 100e6)
+
+        cpu_reset = ~platform.request("cpu_reset")
+        clk100 = platform.request("clk100")
+        self.comb += pll.reset.eq(cpu_reset)
+        pll.register_clkin(clk100, 100e6)
+
         pll.create_clkout(self.cd_sys,       sys_clk_freq)
         pll.create_clkout(self.cd_sys4x,     4*sys_clk_freq)
         pll.create_clkout(self.cd_sys4x_dqs, 4*sys_clk_freq, phase=90)
         pll.create_clkout(self.cd_clk200,    200e6)
         pll.create_clkout(self.cd_eth,       25e6)
+        pll.create_clkout(self.cd_i2s,       22.579e6)
+
 
         self.submodules.idelayctrl = S7IDELAYCTRL(self.cd_clk200)
 
         self.comb += platform.request("eth_ref_clk").eq(self.cd_eth.clk)
+        self.comb += platform.request("i2s_rx_mclk").eq(self.cd_i2s.clk)
+        self.comb += platform.request("i2s_tx_mclk").eq(self.cd_i2s.clk)
 
 # BaseSoC ------------------------------------------------------------------------------------------
 
@@ -77,6 +89,8 @@ class BaseSoC(SoCSDRAM):
 class EthernetSoC(BaseSoC):
     mem_map = {
         "ethmac": 0xb0000000,
+        "i2s_rx": 0xb1000000,
+        "i2s_tx": 0xb2000000
     }
     mem_map.update(BaseSoC.mem_map)
 
@@ -92,6 +106,25 @@ class EthernetSoC(BaseSoC):
         self.add_memory_region("ethmac", self.mem_map["ethmac"], 0x2000, type="io")
         self.add_csr("ethmac")
         self.add_interrupt("ethmac")
+        # I2S --------------------------------------------------------------------------------------
+        # i2s rx
+        self.submodules.i2s_rx = S7I2SSlave(
+            pads = self.platform.request("i2s_rx"),
+        )
+        self.add_memory_region("i2s_rx", self.mem_map["i2s_rx"],0x40000);
+        self.add_wb_slave(self.mem_regions["i2s_rx"].origin, self.i2s_rx.bus,0x40000)
+        self.add_csr("i2s_rx")
+        self.add_interrupt("i2s_rx")
+        # i2s tx
+        i2s_tx = S7I2SSlave(
+            pads = self.platform.request("i2s_tx"),
+        )
+        i2s_tx = ClockDomainsRenamer( {"write" : "sys", "read" : "pix"} )(i2s_tx)
+        self.submodules.i2s_tx = i2s_tx 
+        self.add_memory_region("i2s_tx", self.mem_map["i2s_tx"], 0x40000);
+        self.add_wb_slave(self.mem_regions["i2s_tx"].origin, self.i2s_tx.bus,0x40000)
+        self.add_csr("i2s_tx")
+        self.add_interrupt("i2s_tx")
 
         self.platform.add_period_constraint(self.ethphy.crg.cd_eth_rx.clk, 1e9/12.5e6)
         self.platform.add_period_constraint(self.ethphy.crg.cd_eth_tx.clk, 1e9/12.5e6)
@@ -114,6 +147,7 @@ def main():
 
     cls = EthernetSoC if args.with_ethernet else BaseSoC
     soc = cls(**soc_sdram_argdict(args))
+    
     builder = Builder(soc, **builder_argdict(args))
     builder.build(**vivado_build_argdict(args))
 
