@@ -13,6 +13,7 @@ from litex.build.xilinx.vivado import vivado_build_args, vivado_build_argdict
 from litex.soc.cores.clock import *
 from litex.soc.integration.soc_sdram import *
 from litex.soc.integration.builder import *
+from litex.soc.cores.i2s import *
 
 from litedram.modules import MT41K128M16
 from litedram.phy import s7ddrphy
@@ -92,6 +93,17 @@ class EthernetSoC(BaseSoC):
         self.add_memory_region("ethmac", self.mem_map["ethmac"], 0x2000, type="io")
         self.add_csr("ethmac")
         self.add_interrupt("ethmac")
+        # I2S --------------------------------------------------------------------------------------
+        # i2s rx
+        self.submodules.i2s_rx = S7I2SSlave(
+            pads = self.platform.request("i2s_rx"),
+        )
+        self.add_csr("i2s_rx")
+        # i2s rx
+        self.submodules.i2s_tx = S7I2SSlave(
+            pads = self.platform.request("i2s_tx"),
+        )
+        self.add_csr("i2s_tx")
 
         self.platform.add_period_constraint(self.ethphy.crg.cd_eth_rx.clk, 1e9/12.5e6)
         self.platform.add_period_constraint(self.ethphy.crg.cd_eth_tx.clk, 1e9/12.5e6)

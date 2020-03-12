@@ -138,6 +138,19 @@ _io = [
         Subsignal("crs", Pins("G14")),
         IOStandard("LVCMOS33"),
     ),
+    ("i2s_rx", 0,
+        Subsignal("clk", Pins("F4")),
+        Subsignal("sync", Pins("D3")),
+        Subsignal("rx", Pins("F3")),
+        IOStandard("LVCMOS33"),
+    ),
+    ("i2s_tx", 0,
+        Subsignal("clk", Pins("H2")),
+        Subsignal("sync", Pins("D2")),
+        Subsignal("tx", Pins("G2")),
+        IOStandard("LVCMOS33"),
+    ),
+
 ]
 
 # Connectors ---------------------------------------------------------------------------------------
