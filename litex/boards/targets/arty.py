@@ -78,8 +78,8 @@ class BaseSoC(SoCSDRAM):
 class EthernetSoC(BaseSoC):
     mem_map = {
         "ethmac": 0xb0000000,
-        "i2s_rx": 0x50000000,
-        "i2s_tx": 0x60000000
+        "i2s_rx": 0xc0000000,
+        "i2s_tx": 0xd0000000
     }
     mem_map.update(BaseSoC.mem_map)
 
@@ -100,15 +100,15 @@ class EthernetSoC(BaseSoC):
         self.submodules.i2s_rx = S7I2SSlave(
             pads = self.platform.request("i2s_rx"),
         )
-        self.add_memory_region("i2s_rx", self.mem_map["i2s_rx"], 0x5000000);
-        self.add_wb_slave(self.mem_regions["i2s_rx"].origin, self.i2s_rx.bus, 0x5000000)
+        self.add_memory_region("i2s_rx", self.mem_map["i2s_rx"],0x40000);
+        self.add_wb_slave(self.mem_regions["i2s_rx"].origin, self.i2s_rx.bus,0x40000)
         self.add_csr("i2s_rx")
         # i2s tx
         self.submodules.i2s_tx = S7I2SSlave(
             pads = self.platform.request("i2s_tx"),
         )
-        self.add_memory_region("i2s_tx", self.mem_map["i2s_tx"], 0x5000000);
-        self.add_wb_slave(self.mem_regions["i2s_tx"].origin, self.i2s_tx.bus, 0x5000000)
+        self.add_memory_region("i2s_tx", self.mem_map["i2s_tx"], 0x40000);
+        self.add_wb_slave(self.mem_regions["i2s_tx"].origin, self.i2s_tx.bus,0x40000)
         self.add_csr("i2s_tx")
 
         self.platform.add_period_constraint(self.ethphy.crg.cd_eth_rx.clk, 1e9/12.5e6)
