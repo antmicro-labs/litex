@@ -103,6 +103,7 @@ class EthernetSoC(BaseSoC):
         self.add_memory_region("i2s_rx", self.mem_map["i2s_rx"],0x40000);
         self.add_wb_slave(self.mem_regions["i2s_rx"].origin, self.i2s_rx.bus,0x40000)
         self.add_csr("i2s_rx")
+        self.add_interrupt("i2s_rx")
         # i2s tx
         self.submodules.i2s_tx = S7I2SSlave(
             pads = self.platform.request("i2s_tx"),
@@ -110,6 +111,7 @@ class EthernetSoC(BaseSoC):
         self.add_memory_region("i2s_tx", self.mem_map["i2s_tx"], 0x40000);
         self.add_wb_slave(self.mem_regions["i2s_tx"].origin, self.i2s_tx.bus,0x40000)
         self.add_csr("i2s_tx")
+        self.add_interrupt("i2s_tx")
 
         self.platform.add_period_constraint(self.ethphy.crg.cd_eth_rx.clk, 1e9/12.5e6)
         self.platform.add_period_constraint(self.ethphy.crg.cd_eth_tx.clk, 1e9/12.5e6)
