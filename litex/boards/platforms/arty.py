@@ -145,7 +145,7 @@ _io = [
         Subsignal("rx", Pins("F3")),
         IOStandard("LVCMOS33"),
     ),
-    ("i2s_tx_mclk", 0, Pins("E4"), IOStandard("LVCMOS33")),
+    ("i2s_tx_mclk", 0, Pins("E2"), IOStandard("LVCMOS33")),
     ("i2s_tx", 0,
         Subsignal("clk", Pins("H2")),
         Subsignal("sync", Pins("D2")),

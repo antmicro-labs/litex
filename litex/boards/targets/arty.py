@@ -30,8 +30,7 @@ class _CRG(Module):
         self.clock_domains.cd_sys4x_dqs = ClockDomain(reset_less=True)
         self.clock_domains.cd_clk200    = ClockDomain()
         self.clock_domains.cd_eth       = ClockDomain()
-        self.clock_domains.cd_i2s_rx    = ClockDomain()
-        self.clock_domains.cd_i2s_tx    = ClockDomain()
+        self.clock_domains.cd_i2s    = ClockDomain()
 
         # # #
 
@@ -43,14 +42,13 @@ class _CRG(Module):
         pll.create_clkout(self.cd_sys4x_dqs, 4*sys_clk_freq, phase=90)
         pll.create_clkout(self.cd_clk200,    200e6)
         pll.create_clkout(self.cd_eth,       25e6)
-        pll.create_clkout(self.cd_i2s_rx,       22.579e6)
-        pll.create_clkout(self.cd_i2s_tx,       22.579e6)
+        pll.create_clkout(self.cd_i2s,       22.579e6)
 
         self.submodules.idelayctrl = S7IDELAYCTRL(self.cd_clk200)
 
         self.comb += platform.request("eth_ref_clk").eq(self.cd_eth.clk)
-        self.comb += platform.request("i2s_rx_mclk").eq(self.cd_i2s_rx.clk)
-        self.comb += platform.request("i2s_tx_mclk").eq(self.cd_i2s_tx.clk)
+        self.comb += platform.request("i2s_rx_mclk").eq(self.cd_i2s.clk)
+        self.comb += platform.request("i2s_tx_mclk").eq(self.cd_i2s.clk)
 
 # BaseSoC ------------------------------------------------------------------------------------------
 
