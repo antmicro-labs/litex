@@ -82,8 +82,8 @@ class BaseSoC(SoCSDRAM):
 class EthernetSoC(BaseSoC):
     mem_map = {
         "ethmac": 0xb0000000,
-        "i2s_rx": 0xc0000000,
-        "i2s_tx": 0xd0000000
+        "i2s_rx": 0xb1000000,
+        "i2s_tx": 0xb2000000
     }
     mem_map.update(BaseSoC.mem_map)
 
