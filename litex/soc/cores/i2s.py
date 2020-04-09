@@ -144,7 +144,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
 
         # build the RX subsystem
         if hasattr(pads, 'rx'):
-            rx_rd_d        = Signal(64)
+            rx_rd_d        = Signal(24)
             rx_almostfull  = Signal()
             rx_almostempty = Signal()
             rx_full        = Signal()
@@ -154,7 +154,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             rx_wrerr       = Signal()
             rx_wrcount     = Signal(9)
             rx_rden        = Signal()
-            rx_wr_d        = Signal(64)
+            rx_wr_d        = Signal(24)
             rx_wren        = Signal()
 
             self.rx_ctl = CSRStorage(description="Rx data path control",
@@ -193,7 +193,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             self.specials += Instance("FIFO_SYNC_MACRO",
                 p_DEVICE              = "7SERIES",
                 p_FIFO_SIZE           = "32Kb",
-                p_DATA_WIDTH          = 64,
+                p_DATA_WIDTH          = 48,
                 p_ALMOST_EMPTY_OFFSET = 8,
                 p_ALMOST_FULL_OFFSET  = (512 - fifo_depth),
                 p_DO_REG              = 0,
@@ -260,7 +260,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             rxi2s.act("WAIT_SYNC",
                 If(rising_edge & ~sync_pin,
                     NextState("LEFT"),
-                    NextValue(rx_cnt,32)
+                    NextValue(rx_cnt,24)
                 ),
             )
             rxi2s.act("LEFT",
@@ -278,7 +278,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                 ).Else(
                     If(rising_edge,
                         If((rx_cnt == 0) & sync_pin,
-                            NextValue(rx_cnt, 32),
+                            NextValue(rx_cnt, 24),
                             NextState("RIGHT")
                         ).Elif(rx_cnt > 0,
                             NextState("LEFT")
@@ -301,7 +301,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                 ).Else(
                     If(rising_edge,
                         If((rx_cnt == 0) & ~sync_pin,
-                            NextValue(rx_cnt, 32),
+                            NextValue(rx_cnt,24),
                             NextState("LEFT"),
                             rx_wren.eq(1) # Pulse rx_wren to write the current data word
                         ).Elif(rx_cnt > 0,
