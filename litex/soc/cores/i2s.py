@@ -192,7 +192,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             # At a width of 32 bits, an 18kiB fifo is 512 entries deep
             self.specials += Instance("FIFO_SYNC_MACRO",
                 p_DEVICE              = "7SERIES",
-                p_FIFO_SIZE           = "32Kb",
+                p_FIFO_SIZE           = "36Kb",
                 p_DATA_WIDTH          = 48,
                 p_ALMOST_EMPTY_OFFSET = 8,
                 p_ALMOST_FULL_OFFSET  = (512 - fifo_depth),
@@ -246,6 +246,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             ]
 
             rx_cnt = Signal(5)
+            rx_delay_cnt = Signal(5)
             self.submodules.rxi2s = rxi2s = FSM(reset_state="IDLE")
             rxi2s.act("IDLE",
                 NextValue(rx_wr_d, 0),
@@ -253,14 +254,21 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                     # Wait_sync guarantees we start at the beginning of a left frame, and not in
                     # the middle
                     If(rising_edge & ~sync_pin,
-                        NextState("WAIT_SYNC")
+                        NextState("WAIT_SYNC"),
+                        NextValue(rx_delay_cnt,1)
                    )
                 )
             ),
             rxi2s.act("WAIT_SYNC",
                 If(rising_edge & ~sync_pin,
-                    NextState("LEFT"),
-                    NextValue(rx_cnt,24)
+                    If(rx_delay_cnt > 0,
+                        NextValue(rx_delay_cnt, rx_delay_cnt- 1),
+                        NextState("WAIT_SYNC")
+                    ).Else(
+                        NextState("LEFT"),
+                        NextValue(rx_delay_cnt,1),
+                        NextValue(rx_cnt,24)
+                     )
                 ),
             )
             rxi2s.act("LEFT",
@@ -277,9 +285,19 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                     NextState("IDLE")
                 ).Else(
                     If(rising_edge,
-                        If((rx_cnt == 0) & sync_pin,
-                            NextValue(rx_cnt, 24),
-                            NextState("RIGHT")
+                        If((rx_cnt == 0),
+                            If(sync_pin,
+                                If(rx_delay_cnt == 0,
+                                    NextValue(rx_cnt, 24),
+                                    NextValue(rx_delay_cnt,1),
+                                    NextState("RIGHT")
+                                ).Else(
+                                    NextValue(rx_delay_cnt, rx_delay_cnt- 1),
+                                    NextState("LEFT_WAIT")
+                                )
+                            ).Else(
+                                NextState("LEFT_WAIT")
+                            )
                         ).Elif(rx_cnt > 0,
                             NextState("LEFT")
                         )
@@ -301,9 +319,15 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                 ).Else(
                     If(rising_edge,
                         If((rx_cnt == 0) & ~sync_pin,
-                            NextValue(rx_cnt,24),
-                            NextState("LEFT"),
-                            rx_wren.eq(1) # Pulse rx_wren to write the current data word
+                            If(rx_delay_cnt == 0,
+                                NextValue(rx_cnt,24),
+                                NextValue(rx_delay_cnt,1),
+                                NextState("LEFT"),
+                                rx_wren.eq(1) # Pulse rx_wren to write the current data word
+                            ).Else(
+                                NextValue(rx_delay_cnt, rx_delay_cnt- 1),
+                                NextState("RIGHT_WAIT")
+                            )
                         ).Elif(rx_cnt > 0,
                             NextState("RIGHT")
                         )
