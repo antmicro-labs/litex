@@ -144,15 +144,15 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
 
         # build the RX subsystem
         if hasattr(pads, 'rx'):
-            rx_rd_d        = Signal(24)
+            rx_rd_d        = Signal(32)
             rx_almostfull  = Signal()
             rx_almostempty = Signal()
             rx_full        = Signal()
             rx_empty       = Signal()
-            rx_rdcount     = Signal(9)
+            rx_rdcount     = Signal(10)
             rx_rderr       = Signal()
             rx_wrerr       = Signal()
-            rx_wrcount     = Signal(9)
+            rx_wrcount     = Signal(10)
             rx_rden        = Signal()
             rx_wr_d        = Signal(24)
             rx_wren        = Signal()
@@ -164,12 +164,11 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                 ])
             self.rx_stat = CSRStatus(description="Rx data path status",
                 fields=[
-                    CSRField("overflow",  size=1, description="Rx overflow"),
                     CSRField("underflow", size=1, description="Rx underflow"),
                     CSRField("dataready", size=1, description="{} words of data loaded and ready to read".format(fifo_depth)),
                     CSRField("empty",     size=1, description="No data available in FIFO to read"), # next flags probably never used
-                    CSRField("wrcount",   size=9, description="Write count"),
-                    CSRField("rdcount",   size=9, description="Read count"),
+                    CSRField("wrcount",   size=10, description="Write count"),
+                    CSRField("rdcount",   size=10, description="Read count"),
                     CSRField("fifo_depth", size=9, description="FIFO depth as synthesized")
                 ])
             self.comb += self.rx_stat.fields.fifo_depth.eq(fifo_depth)
@@ -193,7 +192,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             self.specials += Instance("FIFO_SYNC_MACRO",
                 p_DEVICE              = "7SERIES",
                 p_FIFO_SIZE           = "36Kb",
-                p_DATA_WIDTH          = 48,
+                p_DATA_WIDTH          = 32,
                 p_ALMOST_EMPTY_OFFSET = 8,
                 p_ALMOST_FULL_OFFSET  = (512 - fifo_depth),
                 p_DO_REG              = 0,
@@ -204,7 +203,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                 o_FULL        = rx_full,
                 o_EMPTY       = rx_empty,
                 i_WREN        = rx_wren & ~rx_reset,
-                i_DI          = rx_wr_d,
+                i_DI          = Cat(rx_wr_d,0,0,0,0,0,0,0,0),
                 i_RDEN        = rx_rden & ~rx_reset,
                 o_DO          = rx_rd_d,
                 o_RDCOUNT     = rx_rdcount,
@@ -213,7 +212,6 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                 o_WRERR       = rx_wrerr,
             )
             self.comb += [  # Wire up the status signals and interrupts
-                self.rx_stat.fields.overflow.eq(rx_wrerr),
                 self.rx_stat.fields.underflow.eq(rx_rderr),
                 self.rx_stat.fields.dataready.eq(rx_almostfull),
                 self.rx_stat.fields.wrcount.eq(rx_wrcount),
@@ -290,6 +288,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                                 If(rx_delay_cnt == 0,
                                     NextValue(rx_cnt, 24),
                                     NextValue(rx_delay_cnt,1),
+                                    rx_wren.eq(1), # Pulse rx_wren to write the current data word
                                     NextState("RIGHT")
                                 ).Else(
                                     NextValue(rx_delay_cnt, rx_delay_cnt- 1),
@@ -338,17 +337,17 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
 
         # Build the TX subsystem
         if hasattr(pads, 'tx'):
-            tx_rd_d        = Signal(32)
+            tx_rd_d        = Signal(24)
             tx_almostfull  = Signal()
             tx_almostempty = Signal()
             tx_full        = Signal()
             tx_empty       = Signal()
-            tx_rdcount     = Signal(9)
+            tx_rdcount     = Signal(10)
             tx_rderr       = Signal()
             tx_wrerr       = Signal()
-            tx_wrcount     = Signal(9)
+            tx_wrcount     = Signal(10)
             tx_rden        = Signal()
-            tx_wr_d        = Signal(32)
+            tx_wr_d        = Signal(24)
             tx_wren        = Signal()
 
             self.tx_ctl = CSRStorage(description="Tx data path control",
@@ -358,14 +357,13 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                 ])
             self.tx_stat = CSRStatus(description="Tx data path status",
                 fields=[
-                    CSRField("overflow",   size=1, description="Tx overflow"),
                     CSRField("underflow",  size=1, description="Tx underflow"),
                     CSRField("free",       size=1, description="At least {} words of space free".format(fifo_depth)),
                     CSRField("almostfull", size=1, description="Less than 8 words space available"), # the next few flags should be rarely used
                     CSRField("full",       size=1, description="FIFO is full or overfull"),
                     CSRField("empty",      size=1, description="FIFO is empty"),
-                    CSRField("wrcount",    size=9, description="Tx write count"),
-                    CSRField("rdcount",    size=9, description="Tx read count"),
+                    CSRField("wrcount",    size=10, description="Tx write count"),
+                    CSRField("rdcount",    size=10, description="Tx read count"),
                 ])
 
             tx_rst_cnt = Signal(3)
@@ -386,8 +384,8 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             # At a width of 32 bits, an 18kiB fifo is 512 entries deep
             self.specials += Instance("FIFO_SYNC_MACRO",
                 p_DEVICE              = "7SERIES",
-                p_FIFO_SIZE           = "18Kb",
-                p_DATA_WIDTH          = 32,
+                p_FIFO_SIZE           = "36Kb",
+                p_DATA_WIDTH          = 24,
                 p_ALMOST_EMPTY_OFFSET = fifo_depth,
                 p_ALMOST_FULL_OFFSET  = 8,
                 p_DO_REG              = 0,
@@ -408,7 +406,6 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             )
 
             self.comb += [  # Wire up the status signals and interrupts
-                self.tx_stat.fields.overflow.eq(tx_wrerr),
                 self.tx_stat.fields.underflow.eq(tx_rderr),
                 self.tx_stat.fields.free.eq(tx_almostempty),
                 self.tx_stat.fields.almostfull.eq(tx_almostfull),
@@ -438,21 +435,28 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             ]
 
             tx_cnt = Signal(5)
-            tx_buf = Signal(32)
+            tx_delay_cnt = Signal(5)
+            tx_buf = Signal(24)
             self.submodules.txi2s = txi2s = FSM(reset_state="IDLE")
             txi2s.act("IDLE",
                 If(self.tx_ctl.fields.enable,
-                    If(falling_edge & sync_pin,
+                    If(falling_edge & ~sync_pin,
+                        NextValue(tx_delay_cnt,1)
                         NextState("WAIT_SYNC"),
                     )
                 )
             ),
             txi2s.act("WAIT_SYNC",
                 If(falling_edge & ~sync_pin,
-                    NextState("LEFT"),
-                    NextValue(tx_cnt, 16),
-                    NextValue(tx_buf, tx_rd_d),
-                    tx_rden.eq(1)
+                    If(tx_delay_cnt > 0,
+                        NextValue(tx_delay_cnt, tx_delay_cnt- 1),
+                        NextState("WAIT_SYNC"),
+                    ).Else(
+                      NextState("LEFT"),
+                      NextValue(tx_cnt, 24),
+                      NextValue(tx_buf, tx_rd_d),
+                      tx_rden.eq(1),
+                    )
                 )
             )
             txi2s.act("LEFT",
@@ -470,11 +474,21 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                     NextState("IDLE")
                 ).Else(
                     If(falling_edge,
-                        If((tx_cnt == 0) & sync_pin,
-                            NextValue(tx_cnt, 16),
-                            NextState("RIGHT")
+                        If((tx_cnt == 0),
+                            If(sync_pin,
+                                If((tx_delay_cnt == 0),
+                                    NextValue(tx_delay_cnt,1),
+                                    NextValue(tx_cnt, 24),
+                                    NextState("RIGHT")
+                                ).Else(
+                                    NextValue(tx_delay_cnt, tx_delay_cnt- 1),
+                                    NextState("LEFT_WAIT"),
+                                )
+                            ).Else(
+                                NextState("LEFT_WAIT"),
+                            )
                         ).Elif(tx_cnt > 0,
-                            NextState("LEFT")
+                            NextState("LEFT"),
                         )
                     )
                 )
@@ -495,10 +509,15 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                 ).Else(
                     If(falling_edge,
                         If((tx_cnt == 0) & ~sync_pin,
-                            NextValue(tx_cnt, 16),
-                            NextState("LEFT"),
-                            NextValue(tx_buf, tx_rd_d),
-                            tx_rden.eq(1)
+                            If((tx_delay_cnt == 0),
+                                NextValue(tx_cnt, 24),
+                                NextState("LEFT"),
+                                NextValue(tx_buf, tx_rd_d),
+                                tx_rden.eq(1)
+                            ).Else(
+                                NextValue(tx_delay_cnt, tx_delay_cnt- 1),
+                                NextState("RIGHT_WAIT"),
+                            )
                         ).Elif(tx_cnt > 0,
                             NextState("RIGHT")
                         )
