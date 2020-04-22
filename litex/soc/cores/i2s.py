@@ -3,6 +3,7 @@
 
 from migen.genlib.cdc import MultiReg
 
+from litex.soc.cores.clock import *
 from litex.soc.interconnect import wishbone
 from litex.soc.interconnect.csr_eventmanager import *
 
@@ -10,7 +11,7 @@ from litex.soc.integration.doc import AutoDoc, ModuleDoc
 
 
 class S7I2SSlave(Module, AutoCSR, AutoDoc):
-    def __init__(self, pads, fifo_depth=256):
+    def __init__(self, pads, fifo_depth=256,lrck_ref_freq=100e6, lrck_freq=44100):
         self.intro = ModuleDoc("""Intro
 
         I2S slave creates a slave audio interface instance. Tx and Rx interfaces are inferred based
@@ -381,6 +382,21 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                     )
                 )
             ]
+
+            self.sync += [
+                If(self.tx_ctl.fields.reset,
+                   tx_rst_cnt.eq(5), # 5 cycles reset required by design
+                   tx_reset.eq(1)
+                ).Else(
+                    If(tx_rst_cnt == 0,
+                       tx_reset.eq(0)
+                    ).Else(
+                        tx_rst_cnt.eq(tx_rst_cnt - 1),
+                        tx_reset.eq(1)
+                    )
+                )
+            ]
+
             # At a width of 32 bits, an 18kiB fifo is 512 entries deep
             self.specials += Instance("FIFO_SYNC_MACRO",
                 p_DEVICE              = "7SERIES",
@@ -434,6 +450,23 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                 )
             ]
 
+            counter_limit = int(lrck_ref_freq/lrck_freq/2)
+            lrck_delay   = Signal(32)
+            lrck_counter = Signal(16)
+            self.sync += [
+                If((lrck_delay >= int(lrck_ref_freq)),
+                    If((lrck_counter == counter_limit),
+                            lrck_counter.eq(0),
+                            pads.sync.eq(~pads.sync),
+                    ).Else(
+                       lrck_counter.eq(lrck_counter + 1) 
+                    )
+                ).Else(
+                    lrck_delay.eq(lrck_delay +1)
+                )
+            ]
+
+
             tx_cnt = Signal(5)
             tx_delay_cnt = Signal(5)
             tx_buf = Signal(24)
@@ -441,7 +474,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             txi2s.act("IDLE",
                 If(self.tx_ctl.fields.enable,
                     If(falling_edge & ~sync_pin,
-                        NextValue(tx_delay_cnt,1)
+                        NextValue(tx_delay_cnt,1),
                         NextState("WAIT_SYNC"),
                     )
                 )
@@ -463,7 +496,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                 If(~self.tx_ctl.fields.enable,
                     NextState("IDLE")
                 ).Else(
-                    NextValue(tx_pin, tx_buf[31]),
+                    NextValue(tx_pin, tx_buf[23]),
                     NextValue(tx_buf, Cat(0, tx_buf[:-1])),
                     NextValue(tx_cnt, tx_cnt - 1),
                     NextState("LEFT_WAIT")
@@ -497,7 +530,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                 If(~self.tx_ctl.fields.enable,
                     NextState("IDLE")
                 ).Else(
-                    NextValue(tx_pin, tx_buf[31]),
+                    NextValue(tx_pin, tx_buf[23]),
                     NextValue(tx_buf, Cat(0, tx_buf[:-1])),
                     NextValue(tx_cnt, tx_cnt - 1),
                     NextState("RIGHT_WAIT")

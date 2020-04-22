@@ -14,6 +14,7 @@ from litex.soc.cores.clock import *
 from litex.soc.integration.soc_sdram import *
 from litex.soc.integration.builder import *
 from litex.soc.cores.i2s import *
+from litex.soc.cores import gpio
 
 from litedram.modules import MT41K128M16
 from litedram.phy import s7ddrphy
@@ -30,19 +31,25 @@ class _CRG(Module):
         self.clock_domains.cd_sys4x_dqs = ClockDomain(reset_less=True)
         self.clock_domains.cd_clk200    = ClockDomain()
         self.clock_domains.cd_eth       = ClockDomain()
-        self.clock_domains.cd_i2s    = ClockDomain()
+        self.clock_domains.cd_i2s       = ClockDomain()
+        self.clock_domains.cd_i2s_lrck  = ClockDomain()
 
         # # #
 
         self.submodules.pll = pll = S7PLL(speedgrade=-1)
-        self.comb += pll.reset.eq(~platform.request("cpu_reset"))
-        pll.register_clkin(platform.request("clk100"), 100e6)
+
+        cpu_reset = ~platform.request("cpu_reset")
+        clk100 = platform.request("clk100")
+        self.comb += pll.reset.eq(cpu_reset)
+        pll.register_clkin(clk100, 100e6)
+
         pll.create_clkout(self.cd_sys,       sys_clk_freq)
         pll.create_clkout(self.cd_sys4x,     4*sys_clk_freq)
         pll.create_clkout(self.cd_sys4x_dqs, 4*sys_clk_freq, phase=90)
         pll.create_clkout(self.cd_clk200,    200e6)
         pll.create_clkout(self.cd_eth,       25e6)
-        pll.create_clkout(self.cd_i2s,       22.579e6)
+        pll.create_clkout(self.cd_i2s,       33.8680e6)
+
 
         self.submodules.idelayctrl = S7IDELAYCTRL(self.cd_clk200)
 
@@ -109,9 +116,11 @@ class EthernetSoC(BaseSoC):
         self.add_csr("i2s_rx")
         self.add_interrupt("i2s_rx")
         # i2s tx
-        self.submodules.i2s_tx = S7I2SSlave(
+        i2s_tx = S7I2SSlave(
             pads = self.platform.request("i2s_tx"),
         )
+        i2s_tx = ClockDomainsRenamer( {"write" : "sys", "read" : "pix"} )(i2s_tx)
+        self.submodules.i2s_tx = i2s_tx 
         self.add_memory_region("i2s_tx", self.mem_map["i2s_tx"], 0x40000);
         self.add_wb_slave(self.mem_regions["i2s_tx"].origin, self.i2s_tx.bus,0x40000)
         self.add_csr("i2s_tx")
@@ -123,6 +132,12 @@ class EthernetSoC(BaseSoC):
             self.crg.cd_sys.clk,
             self.ethphy.crg.cd_eth_rx.clk,
             self.ethphy.crg.cd_eth_tx.clk)
+        # gpio
+        port_led = []
+        for i in range(4):
+            port_led += [self.platform.request("user_led", i)]
+        self.submodules.port_led = gpio.GPIOOut(port_led)
+        self.add_csr("port_led")
 
 
 # Build --------------------------------------------------------------------------------------------
