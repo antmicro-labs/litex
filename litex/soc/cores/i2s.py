@@ -450,9 +450,9 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                 )
             ]
             # implementing LRCK signal
-            lrck_period= int(lrck_ref_freq/lrck_freq/2)
+            lrck_period = int(lrck_ref_freq/lrck_freq/2)
             lrck_counter = Signal(16)
-            self.sync += [
+            self.sync.clk_i2s+= [
                     If((lrck_counter == lrck_period),
                             lrck_counter.eq(0),
                             pads.sync.eq(~pads.sync),
@@ -462,9 +462,9 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             ]
 
             # implementing LRCK signal
-            sclk_period= int(lrck_ref_freq/lrck_freq/48) # 2 24-bit channel width
+            sclk_period= int(lrck_ref_freq/lrck_freq/96) # 2 24-bit channel width
             sclk_counter = Signal(16)
-            self.sync += [
+            self.sync.clk_i2s+= [
                     If((sclk_counter == sclk_period),
                             sclk_counter.eq(0),
                             pads.clk.eq(~pads.clk),

@@ -32,7 +32,6 @@ class _CRG(Module):
         self.clock_domains.cd_clk200    = ClockDomain()
         self.clock_domains.cd_eth       = ClockDomain()
         self.clock_domains.cd_i2s       = ClockDomain()
-        self.clock_domains.cd_i2s_lrck  = ClockDomain()
 
         # # #
 
@@ -48,7 +47,7 @@ class _CRG(Module):
         pll.create_clkout(self.cd_sys4x_dqs, 4*sys_clk_freq, phase=90)
         pll.create_clkout(self.cd_clk200,    200e6)
         pll.create_clkout(self.cd_eth,       25e6)
-        pll.create_clkout(self.cd_i2s,       22.579e6)
+        pll.create_clkout(self.cd_i2s,       33.868e6)
 
 
         self.submodules.idelayctrl = S7IDELAYCTRL(self.cd_clk200)
@@ -118,8 +117,9 @@ class EthernetSoC(BaseSoC):
         # i2s tx
         i2s_tx = S7I2SSlave(
             pads = self.platform.request("i2s_tx"),
+            lrck_ref_freq = 33.868e6,
         )
-        i2s_tx = ClockDomainsRenamer( {"write" : "sys", "read" : "pix"} )(i2s_tx)
+        i2s_tx = ClockDomainsRenamer( {"clk_i2s" : "i2s"} )(i2s_tx)
         self.submodules.i2s_tx = i2s_tx 
         self.add_memory_region("i2s_tx", self.mem_map["i2s_tx"], 0x40000);
         self.add_wb_slave(self.mem_regions["i2s_tx"].origin, self.i2s_tx.bus,0x40000)
