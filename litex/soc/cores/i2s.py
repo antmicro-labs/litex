@@ -449,21 +449,28 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                     wr_ack.eq(0),
                 )
             ]
-
-            counter_limit = int(lrck_ref_freq/lrck_freq/2)
-            lrck_delay   = Signal(32)
+            # implementing LRCK signal
+            lrck_period= int(lrck_ref_freq/lrck_freq/2)
             lrck_counter = Signal(16)
             self.sync += [
-                If((lrck_delay >= int(lrck_ref_freq)),
-                    If((lrck_counter == counter_limit),
+                    If((lrck_counter == lrck_period),
                             lrck_counter.eq(0),
                             pads.sync.eq(~pads.sync),
                     ).Else(
                        lrck_counter.eq(lrck_counter + 1) 
                     )
-                ).Else(
-                    lrck_delay.eq(lrck_delay +1)
-                )
+            ]
+
+            # implementing LRCK signal
+            sclk_period= int(lrck_ref_freq/lrck_freq/48) # 2 24-bit channel width
+            sclk_counter = Signal(16)
+            self.sync += [
+                    If((sclk_counter == sclk_period),
+                            sclk_counter.eq(0),
+                            pads.clk.eq(~pads.clk),
+                    ).Else(
+                       sclk_counter.eq(sclk_counter + 1) 
+                    )
             ]
 
 
