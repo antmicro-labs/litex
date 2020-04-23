@@ -383,20 +383,6 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                 )
             ]
 
-            self.sync += [
-                If(self.tx_ctl.fields.reset,
-                   tx_rst_cnt.eq(5), # 5 cycles reset required by design
-                   tx_reset.eq(1)
-                ).Else(
-                    If(tx_rst_cnt == 0,
-                       tx_reset.eq(0)
-                    ).Else(
-                        tx_rst_cnt.eq(tx_rst_cnt - 1),
-                        tx_reset.eq(1)
-                    )
-                )
-            ]
-
             # At a width of 32 bits, an 18kiB fifo is 512 entries deep
             self.specials += Instance("FIFO_SYNC_MACRO",
                 p_DEVICE              = "7SERIES",
@@ -432,12 +418,14 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                 self.ev.tx_ready.trigger.eq(tx_almostempty),
                 self.ev.tx_error.trigger.eq(tx_wrerr | tx_rderr),
             ]
+            trash = Signal(8)
+            tx_bus = Cat(tx_wr_d,trash)
             self.sync += [
                 # This is the bus responder -- need to check how this interacts with uncached memory
-                # region
+                # region 
                 If(bus.cyc & bus.stb & bus.we & ~bus.ack,
                    If(~tx_full,
-                      tx_wr_d.eq(bus.dat_w),
+                      tx_bus.eq(bus.dat_w),
                       tx_wren.eq(1),
                       wr_ack.eq(1),
                    ).Else(
@@ -461,7 +449,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                     )
             ]
 
-            # implementing LRCK signal
+            # implementing SCLK signal
             sclk_period= int(lrck_ref_freq/lrck_freq/96) # 2 24-bit channel width
             sclk_counter = Signal(16)
             self.sync.clk_i2s+= [
