@@ -117,7 +117,6 @@ class EthernetSoC(BaseSoC):
         # i2s tx
         i2s_tx = S7I2SSlave(
             pads = self.platform.request("i2s_tx"),
-            lrck_ref_freq = 33.868e6,
         )
         i2s_tx = ClockDomainsRenamer( {"clk_i2s" : "i2s"} )(i2s_tx)
         self.submodules.i2s_tx = i2s_tx 

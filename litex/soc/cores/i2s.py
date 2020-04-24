@@ -418,14 +418,12 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                 self.ev.tx_ready.trigger.eq(tx_almostempty),
                 self.ev.tx_error.trigger.eq(tx_wrerr | tx_rderr),
             ]
-            trash = Signal(8)
-            tx_bus = Cat(tx_wr_d,trash)
             self.sync += [
                 # This is the bus responder -- need to check how this interacts with uncached memory
                 # region 
                 If(bus.cyc & bus.stb & bus.we & ~bus.ack,
                    If(~tx_full,
-                      tx_bus.eq(bus.dat_w),
+                      tx_wr_d.eq(bus.dat_w),
                       tx_wren.eq(1),
                       wr_ack.eq(1),
                    ).Else(
@@ -440,7 +438,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             # implementing LRCK signal
             lrck_period = int(lrck_ref_freq/lrck_freq/2)
             lrck_counter = Signal(16)
-            self.sync.clk_i2s+= [
+            self.sync+= [
                     If((lrck_counter == lrck_period),
                             lrck_counter.eq(0),
                             pads.sync.eq(~pads.sync),
@@ -450,9 +448,9 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             ]
 
             # implementing SCLK signal
-            sclk_period= int(lrck_ref_freq/lrck_freq/96) # 2 24-bit channel width
+            sclk_period= int(lrck_ref_freq/lrck_freq/104) # 2 24-bit channel width
             sclk_counter = Signal(16)
-            self.sync.clk_i2s+= [
+            self.sync+= [
                     If((sclk_counter == sclk_period),
                             sclk_counter.eq(0),
                             pads.clk.eq(~pads.clk),
@@ -507,7 +505,9 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                                 If((tx_delay_cnt == 0),
                                     NextValue(tx_delay_cnt,1),
                                     NextValue(tx_cnt, 24),
-                                    NextState("RIGHT")
+                                    NextState("RIGHT"),
+                                    NextValue(tx_buf, tx_rd_d),
+                                    tx_rden.eq(1)
                                 ).Else(
                                     NextValue(tx_delay_cnt, tx_delay_cnt- 1),
                                     NextState("LEFT_WAIT"),
