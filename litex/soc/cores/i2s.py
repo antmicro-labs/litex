@@ -448,7 +448,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             ]
 
             # implementing SCLK signal
-            sclk_period= int(lrck_ref_freq/lrck_freq/104) # 2 24-bit channel width
+            sclk_period= int(lrck_period/56) # 2 24-bit channel width
             sclk_counter = Signal(16)
             self.sync+= [
                     If((sclk_counter == sclk_period),
@@ -461,35 +461,28 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
 
 
             tx_cnt = Signal(5)
-            tx_delay_cnt = Signal(5)
-            tx_buf = Signal(24)
+            tx_buf = Signal(25)
             self.submodules.txi2s = txi2s = FSM(reset_state="IDLE")
             txi2s.act("IDLE",
                 If(self.tx_ctl.fields.enable,
                     If(falling_edge & ~sync_pin,
-                        NextValue(tx_delay_cnt,1),
                         NextState("WAIT_SYNC"),
                     )
                 )
             ),
             txi2s.act("WAIT_SYNC",
                 If(falling_edge & ~sync_pin,
-                    If(tx_delay_cnt > 0,
-                        NextValue(tx_delay_cnt, tx_delay_cnt- 1),
-                        NextState("WAIT_SYNC"),
-                    ).Else(
                       NextState("LEFT"),
-                      NextValue(tx_cnt, 24),
-                      NextValue(tx_buf, tx_rd_d),
+                      NextValue(tx_cnt, 25),
+                      NextValue(tx_buf, Cat(tx_rd_d,0)),
                       tx_rden.eq(1),
-                    )
                 )
             )
             txi2s.act("LEFT",
                 If(~self.tx_ctl.fields.enable,
                     NextState("IDLE")
                 ).Else(
-                    NextValue(tx_pin, tx_buf[23]),
+                    NextValue(tx_pin, tx_buf[24]),
                     NextValue(tx_buf, Cat(0, tx_buf[:-1])),
                     NextValue(tx_cnt, tx_cnt - 1),
                     NextState("LEFT_WAIT")
@@ -502,16 +495,10 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                     If(falling_edge,
                         If((tx_cnt == 0),
                             If(sync_pin,
-                                If((tx_delay_cnt == 0),
-                                    NextValue(tx_delay_cnt,1),
-                                    NextValue(tx_cnt, 24),
+                                    NextValue(tx_cnt, 25),
                                     NextState("RIGHT"),
                                     NextValue(tx_buf, tx_rd_d),
                                     tx_rden.eq(1)
-                                ).Else(
-                                    NextValue(tx_delay_cnt, tx_delay_cnt- 1),
-                                    NextState("LEFT_WAIT"),
-                                )
                             ).Else(
                                 NextState("LEFT_WAIT"),
                             )
@@ -525,7 +512,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                 If(~self.tx_ctl.fields.enable,
                     NextState("IDLE")
                 ).Else(
-                    NextValue(tx_pin, tx_buf[23]),
+                    NextValue(tx_pin, tx_buf[24]),
                     NextValue(tx_buf, Cat(0, tx_buf[:-1])),
                     NextValue(tx_cnt, tx_cnt - 1),
                     NextState("RIGHT_WAIT")
@@ -537,15 +524,10 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                 ).Else(
                     If(falling_edge,
                         If((tx_cnt == 0) & ~sync_pin,
-                            If((tx_delay_cnt == 0),
-                                NextValue(tx_cnt, 24),
+                                NextValue(tx_cnt, 25),
                                 NextState("LEFT"),
-                                NextValue(tx_buf, tx_rd_d),
+                                NextValue(tx_buf, Cat(tx_rd_d,0)),
                                 tx_rden.eq(1)
-                            ).Else(
-                                NextValue(tx_delay_cnt, tx_delay_cnt- 1),
-                                NextState("RIGHT_WAIT"),
-                            )
                         ).Elif(tx_cnt > 0,
                             NextState("RIGHT")
                         )
