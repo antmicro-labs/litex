@@ -8,10 +8,13 @@ from litex.soc.interconnect import wishbone
 from litex.soc.interconnect.csr_eventmanager import *
 
 from litex.soc.integration.doc import AutoDoc, ModuleDoc
-
+from enum import Enum
+class I2S_FORMAT(Enum):
+    I2S_STANDARD = 1
+    I2S_LEFT_JUSTIFIED = 2
 
 class S7I2SSlave(Module, AutoCSR, AutoDoc):
-    def __init__(self, pads, fifo_depth=256,lrck_ref_freq=100e6, lrck_freq=44100):
+    def __init__(self, pads, fifo_depth=256, master=False, sample_width=16, frame_format=I2S_FORMAT.I2S_LEFT_JUSTIFIED, lrck_ref_freq=100e6, lrck_freq=44100, bits_per_channel=28):
         self.intro = ModuleDoc("""Intro
 
         I2S slave creates a slave audio interface instance. Tx and Rx interfaces are inferred based
@@ -92,8 +95,8 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
         - Tx is data to the codec (SDI pin on LM49352)
         - Rx is data from the codec (SDO pin on LM49352)
         """)
-
-        # One cache line is 8 32-bit words, need to always have enough space for one line or else
+         
+      # One cache line is 8 32-bit words, need to always have enough space for one line or else
         # nothing works
         if fifo_depth > 504:
             fifo_depth = 504
@@ -101,6 +104,9 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
         if fifo_depth < 8:
             fifo_depth = 8
             print("I2S warning: fifo depth less than 8 selected; truncating to 8")
+        if sample_width > 32:
+            sample_width= 32
+            print("I2S warning: sample width greater than 32 bits. truncating to 32")
 
         # Connect pins, synchronizers, and edge detectors
         if hasattr(pads, 'tx'):
@@ -132,6 +138,33 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             )
         ]
 
+        if master == True:
+            if bits_per_channel < sample_width:
+                bits_per_channel = sample_width+1
+                print("I2S warning: bits per channel can't be smaller than sample_width. Setting bits per channel to {}".format(sample_width+1))
+            # implementing LRCK signal
+            lrck_period = int(lrck_ref_freq/(lrck_freq*2))
+            lrck_counter = Signal(16)
+            self.sync+= [
+                    If((lrck_counter == lrck_period),
+                            lrck_counter.eq(0),
+                            pads.sync.eq(~pads.sync),
+                    ).Else(
+                       lrck_counter.eq(lrck_counter + 1) 
+                    )
+            ]
+            # implementing SCLK signal
+            sclk_period= int(lrck_period/(bits_per_channel*2))
+            sclk_counter = Signal(16)
+            self.sync+= [
+                    If((sclk_counter == sclk_period),
+                            sclk_counter.eq(0),
+                            pads.clk.eq(~pads.clk),
+                    ).Else(
+                       sclk_counter.eq(sclk_counter + 1) 
+                    )
+            ]
+
         # Interrupts
         self.submodules.ev = EventManager()
         if hasattr(pads, 'rx'):
@@ -145,7 +178,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
 
         # build the RX subsystem
         if hasattr(pads, 'rx'):
-            rx_rd_d        = Signal(32)
+            rx_rd_d        = Signal(sample_width)
             rx_almostfull  = Signal()
             rx_almostempty = Signal()
             rx_full        = Signal()
@@ -155,7 +188,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             rx_wrerr       = Signal()
             rx_wrcount     = Signal(10)
             rx_rden        = Signal()
-            rx_wr_d        = Signal(24)
+            rx_wr_d        = Signal(sample_width)
             rx_wren        = Signal()
 
             self.rx_ctl = CSRStorage(description="Rx data path control",
@@ -189,11 +222,12 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                     )
                 )
             ]
+
             # At a width of 32 bits, an 18kiB fifo is 512 entries deep
             self.specials += Instance("FIFO_SYNC_MACRO",
                 p_DEVICE              = "7SERIES",
                 p_FIFO_SIZE           = "36Kb",
-                p_DATA_WIDTH          = 32,
+                p_DATA_WIDTH          = sample_width,
                 p_ALMOST_EMPTY_OFFSET = 8,
                 p_ALMOST_FULL_OFFSET  = (512 - fifo_depth),
                 p_DO_REG              = 0,
@@ -204,7 +238,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                 o_FULL        = rx_full,
                 o_EMPTY       = rx_empty,
                 i_WREN        = rx_wren & ~rx_reset,
-                i_DI          = Cat(rx_wr_d,0,0,0,0,0,0,0,0),
+                i_DI          = Cat(rx_wr_d),
                 i_RDEN        = rx_rden & ~rx_reset,
                 o_DO          = rx_rd_d,
                 o_RDCOUNT     = rx_rdcount,
@@ -245,28 +279,30 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             ]
 
             rx_cnt = Signal(5)
-            rx_delay_cnt = Signal(5)
+            rx_delay_cnt = Signal()
+            rx_delay_val = 1 if frame_format == I2S_FORMAT.I2S_STANDARD else 0 
+
             self.submodules.rxi2s = rxi2s = FSM(reset_state="IDLE")
             rxi2s.act("IDLE",
                 NextValue(rx_wr_d, 0),
                 If(self.rx_ctl.fields.enable,
                     # Wait_sync guarantees we start at the beginning of a left frame, and not in
                     # the middle
-                    If(rising_edge & ~sync_pin,
+                    If(rising_edge & (~sync_pin if frame_format == I2S_FORMAT.I2S_STANDARD else sync_pin),
                         NextState("WAIT_SYNC"),
-                        NextValue(rx_delay_cnt,1)
+                        NextValue(rx_delay_cnt,rx_delay_val)
                    )
                 )
             ),
             rxi2s.act("WAIT_SYNC",
-                If(rising_edge & ~sync_pin,
+                If(rising_edge & (~sync_pin if frame_format == I2S_FORMAT.I2S_STANDARD else sync_pin),
                     If(rx_delay_cnt > 0,
                         NextValue(rx_delay_cnt, rx_delay_cnt- 1),
                         NextState("WAIT_SYNC")
                     ).Else(
                         NextState("LEFT"),
-                        NextValue(rx_delay_cnt,1),
-                        NextValue(rx_cnt,24)
+                        NextValue(rx_delay_cnt,rx_delay_val),
+                        NextValue(rx_cnt,sample_width)
                      )
                 ),
             )
@@ -285,10 +321,10 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                 ).Else(
                     If(rising_edge,
                         If((rx_cnt == 0),
-                            If(sync_pin,
+                            If((sync_pin if frame_format == I2S_FORMAT.I2S_STANDARD else ~sync_pin),
                                 If(rx_delay_cnt == 0,
-                                    NextValue(rx_cnt, 24),
-                                    NextValue(rx_delay_cnt,1),
+                                    NextValue(rx_cnt, sample_width),
+                                    NextValue(rx_delay_cnt,rx_delay_val),
                                     rx_wren.eq(1), # Pulse rx_wren to write the current data word
                                     NextState("RIGHT")
                                 ).Else(
@@ -318,10 +354,10 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                     NextState("IDLE")
                 ).Else(
                     If(rising_edge,
-                        If((rx_cnt == 0) & ~sync_pin,
+                        If((rx_cnt == 0) & (~sync_pin if frame_format == I2S_FORMAT.I2S_STANDARD else sync_pin),
                             If(rx_delay_cnt == 0,
-                                NextValue(rx_cnt,24),
-                                NextValue(rx_delay_cnt,1),
+                                NextValue(rx_cnt,sample_width),
+                                NextValue(rx_delay_cnt,rx_delay_val),
                                 NextState("LEFT"),
                                 rx_wren.eq(1) # Pulse rx_wren to write the current data word
                             ).Else(
@@ -338,7 +374,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
 
         # Build the TX subsystem
         if hasattr(pads, 'tx'):
-            tx_rd_d        = Signal(24)
+            tx_rd_d        = Signal(sample_width)
             tx_almostfull  = Signal()
             tx_almostempty = Signal()
             tx_full        = Signal()
@@ -348,7 +384,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             tx_wrerr       = Signal()
             tx_wrcount     = Signal(10)
             tx_rden        = Signal()
-            tx_wr_d        = Signal(24)
+            tx_wr_d        = Signal(sample_width)
             tx_wren        = Signal()
 
             self.tx_ctl = CSRStorage(description="Tx data path control",
@@ -387,7 +423,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             self.specials += Instance("FIFO_SYNC_MACRO",
                 p_DEVICE              = "7SERIES",
                 p_FIFO_SIZE           = "36Kb",
-                p_DATA_WIDTH          = 24,
+                p_DATA_WIDTH          = sample_width,
                 p_ALMOST_EMPTY_OFFSET = fifo_depth,
                 p_ALMOST_FULL_OFFSET  = 8,
                 p_DO_REG              = 0,
@@ -435,45 +471,22 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                     wr_ack.eq(0),
                 )
             ]
-            # implementing LRCK signal
-            lrck_period = int(lrck_ref_freq/lrck_freq/2)
-            lrck_counter = Signal(16)
-            self.sync+= [
-                    If((lrck_counter == lrck_period),
-                            lrck_counter.eq(0),
-                            pads.sync.eq(~pads.sync),
-                    ).Else(
-                       lrck_counter.eq(lrck_counter + 1) 
-                    )
-            ]
 
-            # implementing SCLK signal
-            sclk_period= int(lrck_period/56) # 2 24-bit channel width
-            sclk_counter = Signal(16)
-            self.sync+= [
-                    If((sclk_counter == sclk_period),
-                            sclk_counter.eq(0),
-                            pads.clk.eq(~pads.clk),
-                    ).Else(
-                       sclk_counter.eq(sclk_counter + 1) 
-                    )
-            ]
-
-
+            tx_cnt_val = sample_width+1 if frame_format == I2S_FORMAT.I2S_STANDARD else sample_width 
             tx_cnt = Signal(5)
-            tx_buf = Signal(25)
+            tx_buf = Signal(tx_cnt_val)
             self.submodules.txi2s = txi2s = FSM(reset_state="IDLE")
             txi2s.act("IDLE",
                 If(self.tx_ctl.fields.enable,
-                    If(falling_edge & ~sync_pin,
+                    If(falling_edge & (~sync_pin if frame_format == I2S_FORMAT.I2S_STANDARD else sync_pin),
                         NextState("WAIT_SYNC"),
                     )
                 )
             ),
             txi2s.act("WAIT_SYNC",
-                If(falling_edge & ~sync_pin,
+                If(falling_edge & (~sync_pin if frame_format == I2S_FORMAT.I2S_STANDARD else sync_pin),
                       NextState("LEFT"),
-                      NextValue(tx_cnt, 25),
+                      NextValue(tx_cnt, tx_cnt_val),
                       NextValue(tx_buf, Cat(tx_rd_d,0)),
                       tx_rden.eq(1),
                 )
@@ -482,7 +495,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                 If(~self.tx_ctl.fields.enable,
                     NextState("IDLE")
                 ).Else(
-                    NextValue(tx_pin, tx_buf[24]),
+                    NextValue(tx_pin, tx_buf[tx_cnt_val-1]),
                     NextValue(tx_buf, Cat(0, tx_buf[:-1])),
                     NextValue(tx_cnt, tx_cnt - 1),
                     NextState("LEFT_WAIT")
@@ -494,8 +507,8 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                 ).Else(
                     If(falling_edge,
                         If((tx_cnt == 0),
-                            If(sync_pin,
-                                    NextValue(tx_cnt, 25),
+                            If((sync_pin if frame_format == I2S_FORMAT.I2S_STANDARD else ~sync_pin),
+                                    NextValue(tx_cnt, tx_cnt_val),
                                     NextState("RIGHT"),
                                     NextValue(tx_buf, tx_rd_d),
                                     tx_rden.eq(1)
@@ -512,7 +525,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                 If(~self.tx_ctl.fields.enable,
                     NextState("IDLE")
                 ).Else(
-                    NextValue(tx_pin, tx_buf[24]),
+                    NextValue(tx_pin, tx_buf[tx_cnt_val-1]),
                     NextValue(tx_buf, Cat(0, tx_buf[:-1])),
                     NextValue(tx_cnt, tx_cnt - 1),
                     NextState("RIGHT_WAIT")
@@ -523,8 +536,8 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                     NextState("IDLE")
                 ).Else(
                     If(falling_edge,
-                        If((tx_cnt == 0) & ~sync_pin,
-                                NextValue(tx_cnt, 25),
+                        If((tx_cnt == 0) & (~sync_pin if frame_format == I2S_FORMAT.I2S_STANDARD else sync_pin),
+                                NextValue(tx_cnt, tx_cnt_val),
                                 NextState("LEFT"),
                                 NextValue(tx_buf, Cat(tx_rd_d,0)),
                                 tx_rden.eq(1)
