@@ -115,7 +115,8 @@ class EthernetSoC(BaseSoC):
         self.submodules.i2s_rx = S7I2SSlave(
             pads = self.platform.request("i2s_rx"),
             sample_width=24,
-            frame_format=I2S_FORMAT.I2S_STANDARD
+            frame_format=I2S_FORMAT.I2S_STANDARD,
+            channels_padded=False
         )
         self.add_memory_region("i2s_rx", self.mem_map["i2s_rx"],0x40000);
         self.add_wb_slave(self.mem_regions["i2s_rx"].origin, self.i2s_rx.bus,0x40000)
@@ -126,7 +127,8 @@ class EthernetSoC(BaseSoC):
             pads = self.platform.request("i2s_tx"),
             sample_width=24,
             frame_format=I2S_FORMAT.I2S_STANDARD,
-            master=True
+            master=True,
+            channels_padded=False
         )
  
         self.add_memory_region("i2s_tx", self.mem_map["i2s_tx"], 0x40000);
