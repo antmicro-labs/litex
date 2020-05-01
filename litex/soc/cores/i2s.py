@@ -496,7 +496,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                     NextState("IDLE")
                 ).Else(
                     NextValue(tx_pin, tx_buf[tx_cnt_val-1]),
-                    NextValue(tx_buf, Cat(0, tx_buf[:-1])),
+                    NextValue(tx_buf, Cat(tx_buf[:-1],0)),
                     NextValue(tx_cnt, tx_cnt - 1),
                     NextState("LEFT_WAIT")
                 )
@@ -510,7 +510,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                             If((sync_pin if frame_format == I2S_FORMAT.I2S_STANDARD else ~sync_pin),
                                     NextValue(tx_cnt, tx_cnt_val),
                                     NextState("RIGHT"),
-                                    NextValue(tx_buf, tx_rd_d),
+                                    NextValue(tx_buf, Cat(tx_buf[:-1],0)),
                                     tx_rden.eq(1)
                             ).Else(
                                 NextState("LEFT_WAIT"),
