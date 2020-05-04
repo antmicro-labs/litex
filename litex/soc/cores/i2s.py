@@ -15,7 +15,7 @@ class I2S_FORMAT(Enum):
     I2S_LEFT_JUSTIFIED = 2
 
 class S7I2SSlave(Module, AutoCSR, AutoDoc):
-    def __init__(self, pads, fifo_depth=256, fifo_size="18Kb", master=False,channels_padded=True, sample_width=16, frame_format=I2S_FORMAT.I2S_LEFT_JUSTIFIED, lrck_ref_freq=100e6, lrck_freq=44100, bits_per_channel=28):
+    def __init__(self, pads, fifo_depth=256, fifo_size="18Kb", master=False,concatenate_channels=True, sample_width=16, frame_format=I2S_FORMAT.I2S_LEFT_JUSTIFIED, lrck_ref_freq=100e6, lrck_freq=44100, bits_per_channel=28):
         self.intro = ModuleDoc("""Intro
 
         I2S master/slave creates a master/slave audio interface instance depends on choosen master option. Tx and Rx interfaces are inferred based
@@ -118,7 +118,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             self.specials += MultiReg(pads.rx, rx_pin)
         
         fifo_data_width = sample_width
-        if channels_padded:
+        if concatenate_channels:
             if sample_width <= 16:
                 fifo_data_width=sample_width*2
             else:
@@ -224,7 +224,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                     CSRField("wrcount",   size=9, description="Write count"),
                     CSRField("rdcount",   size=9, description="Read count"),
                     CSRField("fifo_depth", size=9, description="FIFO depth as synthesized"),
-                    CSRField("channels_padded", size=1, reset=channels_padded, description="Channels padded in fifo")
+                    CSRField("concatenate_channels", size=1, reset=concatenate_channels, description="Receive and send both channels atomically")
                 ])
             self.comb += self.rx_stat.fields.fifo_depth.eq(fifo_depth)
 
@@ -336,7 +336,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                     NextState("LEFT_WAIT")
                 )
             )
-            if channels_padded:
+            if concatenate_channels:
                 rxi2s.act("LEFT_WAIT",
                     If(~self.rx_ctl.fields.enable,
                         NextState("IDLE")
@@ -450,7 +450,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                     CSRField("empty",      size=1, description="FIFO is empty"),
                     CSRField("wrcount",    size=9, description="Tx write count"),
                     CSRField("rdcount",    size=9, description="Tx read count"),
-                    CSRField("channels_padded", size=1, reset=channels_padded, description="Channels padded in fifo")
+                    CSRField("concatenate_channels", size=1, reset=concatenate_channels, description="Receive and send both channels atomically")
                 ])
 
             tx_rst_cnt = Signal(3)
@@ -555,7 +555,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                     NextState("LEFT_WAIT")
                 )
             )
-            if channels_padded:
+            if concatenate_channels:
                 txi2s.act("LEFT_WAIT",
                     If(~self.tx_ctl.fields.enable,
                         NextState("IDLE")

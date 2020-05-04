@@ -31,7 +31,7 @@ class _CRG(Module):
         self.clock_domains.cd_sys4x_dqs = ClockDomain(reset_less=True)
         self.clock_domains.cd_clk200    = ClockDomain()
         self.clock_domains.cd_eth       = ClockDomain()
-        self.clock_domains.cd_i2s       = ClockDomain()
+        self.clock_domains.cd_i2s_rx    = ClockDomain()
         self.clock_domains.cd_i2s_tx    = ClockDomain()
 
         # # #
@@ -51,14 +51,14 @@ class _CRG(Module):
         pll.create_clkout(self.cd_sys4x_dqs, 4*sys_clk_freq, phase=90)
         pll.create_clkout(self.cd_clk200,    200e6)
         pll.create_clkout(self.cd_eth,       25e6)
-        pll.create_clkout(self.cd_i2s,       11.289e6)
+        pll.create_clkout(self.cd_i2s_rx,       11.289e6)
         pll2.create_clkout(self.cd_i2s_tx,   22.579e6)
 
 
         self.submodules.idelayctrl = S7IDELAYCTRL(self.cd_clk200)
 
         self.comb += platform.request("eth_ref_clk").eq(self.cd_eth.clk)
-        self.comb += platform.request("i2s_rx_mclk").eq(self.cd_i2s.clk)
+        self.comb += platform.request("i2s_rx_mclk").eq(self.cd_i2s_rx.clk)
         self.comb += platform.request("i2s_tx_mclk").eq(self.cd_i2s_tx.clk)
 
 # BaseSoC ------------------------------------------------------------------------------------------
@@ -116,7 +116,7 @@ class EthernetSoC(BaseSoC):
             pads = self.platform.request("i2s_rx"),
             sample_width=24,
             frame_format=I2S_FORMAT.I2S_STANDARD,
-            channels_padded=False
+            concatenate_channels=False
         )
         self.add_memory_region("i2s_rx", self.mem_map["i2s_rx"],0x40000);
         self.add_wb_slave(self.mem_regions["i2s_rx"].origin, self.i2s_rx.bus,0x40000)
@@ -128,7 +128,7 @@ class EthernetSoC(BaseSoC):
             sample_width=24,
             frame_format=I2S_FORMAT.I2S_STANDARD,
             master=True,
-            channels_padded=False
+            concatenate_channels=False
         )
  
         self.add_memory_region("i2s_tx", self.mem_map["i2s_tx"], 0x40000);
