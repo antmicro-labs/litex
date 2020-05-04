@@ -15,26 +15,38 @@ class I2S_FORMAT(Enum):
     I2S_LEFT_JUSTIFIED = 2
 
 class S7I2SSlave(Module, AutoCSR, AutoDoc):
-    def __init__(self, pads, fifo_depth=256, fifo_size="18Kb", master=False,concatenate_channels=True, sample_width=16, frame_format=I2S_FORMAT.I2S_LEFT_JUSTIFIED, lrck_ref_freq=100e6, lrck_freq=44100, bits_per_channel=28):
+    def __init__(self, pads, fifo_depth=256, master=False,concatenate_channels=True, sample_width=16, frame_format=I2S_FORMAT.I2S_LEFT_JUSTIFIED, lrck_ref_freq=100e6, lrck_freq=44100, bits_per_channel=28):
         self.intro = ModuleDoc("""Intro
 
-        I2S master/slave creates a master/slave audio interface instance depends on choosen master option. Tx and Rx interfaces are inferred based
-        upon the presence or absence of the respective pins in the "pads" argument.
+        I2S master/slave creates a master/slave audio interface instance depends on configured master variable. 
+        Tx and Rx interfaces are inferred based upon the presence or absence of the respective pins in the "pads" argument.
+        
+        When device is configured as master you can manipulate LRCK and SCLK signals using below variables.
+        - lrck_ref_freq - is a reference signal that is required to achive desired LRCK and SCLK frequencies.
+                         Have be the same as your sys_clk.
+        - lrck_freq - this variable defines requested LRCK frequency. Mind you, that based on sys_clk frequency, 
+                         configured value will be more or less acurate.
+        - bits_per_channel - defines SCLK frequency. Mind you, that based on sys_clk frequency, 
+                         the requested amount of bits per channel may vary from configured.
+        
+        When device is configured as slave I2S interface, sampling rate and framing is set by the
+        programming of the audio CODEC chip. A slave situation is more comfortable because this defers the
+        generation of audio clocks to the CODEC, which has PLLs specialized to generate the correct
+        frequencies for audio sampling rates.
 
-        The interface is I2S-like, but note the deviation that the bits are justified left without a
-        1-bit pad after sync edges. This isn't a problem for talking to the LM49352 codec this was
-        designed for, as the bit offset is programmable, but this will not work well if are talking
-        to a CODEC without a programmable bit offset!
+        I2S core supports two formats: standard and left-justified.
+        - Standard format requires from device to receive and send data with one bit offset for both channels. 
+            Left channel begins with low signal on LRCK.
+        - Left justified format requires from device to receive and send data without any bit offset for both channels.
+            Left channel begins with high signal on LRCK.
+    
+        Sample width can be any of 1 to 32 bits.
+
+        When sample_width less than or equal to 16-bit and concatenate_channels is enabled,
+        sending and reciving channels is performed atomically. eg. both samples are transfered from/to fifo in single operation.
 
         System Interface
         ----------------
-
-        Audio interchange is done with the system using 16-bit stereo samples, with the right channel
-        mapped to the least significant word of a 32-bit word. Thus each 32-bit word is a single
-        stereo sample. As this is a slave I2S interface, sampling rate and framing is set by the
-        programming of the audio CODEC chip. A slave situation is preferred because this defers the
-        generation of audio clocks to the CODEC, which has PLLs specialized to generate the correct
-        frequencies for audio sampling rates.
 
         `fifo_depth` is the depth at which either a read interrupt is fired (guaranteeing at least
         `fifo_depth` stereo samples in the receive FIFO) or a write interrupt is fired (guaranteeing
@@ -89,9 +101,8 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
 
         - Data is updated on the falling edge
         - Data is sampled on the rising edge
-        - Words are MSB-to-LSB, left-justified (**NOTE: this is a deviation from strict I2S, which
-          offsets by 1 from the left**)
-        - Sync is an input (FPGA is slave, codec is master): low => left channel, high => right channel
+        - Words are MSB-to-LSB,  
+        - Sync is an input or output based on configure mode,
         - Sync can be longer than the wordlen, extra bits are just ignored
         - Tx is data to the codec (SDI pin on LM49352)
         - Rx is data from the codec (SDO pin on LM49352)
@@ -124,15 +135,6 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             else:
                 print("I2S warning: sample width greater than 16 bits. your channels can't be glued")
 
-        rdwr_count_size = 9
-        if fifo_size == "18Kb":
-           rdwr_count_size = int(math.log(18000/fifo_data_width,2))
-        elif fifo_size == "36Kb":
-           rdwr_count_size = int(math.log(36000/fifo_data_width,2))
-        else:
-            printf("I2S error: fifo size must be one of [18Kb or 36Kb]")
-            exit(1)
-        rdwr_complement = [0]*(rdwr_count_size-9)
 
         sync_pin = Signal()
         self.specials += MultiReg(pads.sync, sync_pin)
@@ -202,10 +204,10 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             rx_almostempty = Signal()
             rx_full        = Signal()
             rx_empty       = Signal()
-            rx_rdcount     = Signal(rdwr_count_size)
+            rx_rdcount     = Signal(9)
             rx_rderr       = Signal()
             rx_wrerr       = Signal()
-            rx_wrcount     = Signal(rdwr_count_size)
+            rx_wrcount     = Signal(9)
             rx_rden        = Signal()
             rx_wr_d        = Signal(fifo_data_width)
             rx_wren        = Signal()
@@ -247,7 +249,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             # At a width of 32 bits, an 18kiB fifo is 512 entries deep
             self.specials += Instance("FIFO_SYNC_MACRO",
                 p_DEVICE              = "7SERIES",
-                p_FIFO_SIZE           = fifo_size,
+                p_FIFO_SIZE           = "18Kb",
                 p_DATA_WIDTH          = fifo_data_width,
                 p_ALMOST_EMPTY_OFFSET = 8,
                 p_ALMOST_FULL_OFFSET  = (512 - fifo_depth),
@@ -270,8 +272,8 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             self.comb += [  # Wire up the status signals and interrupts
                 self.rx_stat.fields.underflow.eq(rx_rderr),
                 self.rx_stat.fields.dataready.eq(rx_almostfull),
-                self.rx_stat.fields.wrcount.eq(Cat(rx_wrcount,rdwr_complement)),
-                self.rx_stat.fields.rdcount.eq(Cat(rx_rdcount,rdwr_complement)),
+                self.rx_stat.fields.wrcount.eq(rx_wrcount),
+                self.rx_stat.fields.rdcount.eq(rx_rdcount),
                 self.ev.rx_ready.trigger.eq(rx_almostfull),
                 self.ev.rx_error.trigger.eq(rx_wrerr | rx_rderr),
             ]
@@ -427,10 +429,10 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             tx_almostempty = Signal()
             tx_full        = Signal()
             tx_empty       = Signal()
-            tx_rdcount     = Signal(rdwr_count_size)
+            tx_rdcount     = Signal(9)
             tx_rderr       = Signal()
             tx_wrerr       = Signal()
-            tx_wrcount     = Signal(rdwr_count_size)
+            tx_wrcount     = Signal(9)
             tx_rden        = Signal()
             tx_wr_d        = Signal(fifo_data_width)
             tx_wren        = Signal()
@@ -472,7 +474,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             # At a width of 32 bits, an 18kiB fifo is 512 entries deep
             self.specials += Instance("FIFO_SYNC_MACRO",
                 p_DEVICE              = "7SERIES",
-                p_FIFO_SIZE           = fifo_size,
+                p_FIFO_SIZE           = "18Kb",
                 p_DATA_WIDTH          = fifo_data_width,
                 p_ALMOST_EMPTY_OFFSET = fifo_depth,
                 p_ALMOST_FULL_OFFSET  = 8,
@@ -499,8 +501,8 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                 self.tx_stat.fields.almostfull.eq(tx_almostfull),
                 self.tx_stat.fields.full.eq(tx_full),
                 self.tx_stat.fields.empty.eq(tx_empty),
-                self.tx_stat.fields.rdcount.eq(Cat(tx_rdcount, rdwr_complement)),
-                self.tx_stat.fields.wrcount.eq(Cat(tx_wrcount,rdwr_complement)),
+                self.tx_stat.fields.rdcount.eq(tx_rdcount),
+                self.tx_stat.fields.wrcount.eq(tx_wrcount),
                 self.ev.tx_ready.trigger.eq(tx_almostempty),
                 self.ev.tx_error.trigger.eq(tx_wrerr | tx_rderr),
             ]
