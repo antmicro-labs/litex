@@ -51,7 +51,7 @@ class _CRG(Module):
         pll.create_clkout(self.cd_sys4x_dqs, 4*sys_clk_freq, phase=90)
         pll.create_clkout(self.cd_clk200,    200e6)
         pll.create_clkout(self.cd_eth,       25e6)
-        pll.create_clkout(self.cd_i2s_rx,       11.289e6)
+        pll.create_clkout(self.cd_i2s_rx,    11.289e6)
         pll2.create_clkout(self.cd_i2s_tx,   22.579e6)
 
 
@@ -111,28 +111,29 @@ class EthernetSoC(BaseSoC):
         self.add_csr("ethmac")
         self.add_interrupt("ethmac")
         # I2S --------------------------------------------------------------------------------------
+        i2s_mem_size=0x40000;
         # i2s rx
         self.submodules.i2s_rx = S7I2SSlave(
-            pads = self.platform.request("i2s_rx"),
+            pads=self.platform.request("i2s_rx"),
             sample_width=24,
             frame_format=I2S_FORMAT.I2S_STANDARD,
             concatenate_channels=False
         )
-        self.add_memory_region("i2s_rx", self.mem_map["i2s_rx"],0x40000);
-        self.add_wb_slave(self.mem_regions["i2s_rx"].origin, self.i2s_rx.bus,0x40000)
+        self.add_memory_region("i2s_rx", self.mem_map["i2s_rx"], i2s_mem_size);
+        self.add_wb_slave(self.mem_regions["i2s_rx"].origin, self.i2s_rx.bus, i2s_mem_size)
         self.add_csr("i2s_rx")
         self.add_interrupt("i2s_rx")
         # i2s tx
         self.submodules.i2s_tx = S7I2SSlave(
-            pads = self.platform.request("i2s_tx"),
+            pads=self.platform.request("i2s_tx"),
             sample_width=24,
             frame_format=I2S_FORMAT.I2S_STANDARD,
             master=True,
             concatenate_channels=False
         )
  
-        self.add_memory_region("i2s_tx", self.mem_map["i2s_tx"], 0x40000);
-        self.add_wb_slave(self.mem_regions["i2s_tx"].origin, self.i2s_tx.bus,0x40000)
+        self.add_memory_region("i2s_tx", self.mem_map["i2s_tx"], i2s_mem_size);
+        self.add_wb_slave(self.mem_regions["i2s_tx"].origin, self.i2s_tx.bus, i2s_mem_size)
         self.add_csr("i2s_tx")
         self.add_interrupt("i2s_tx")
 
@@ -157,7 +158,6 @@ def main():
 
     cls = EthernetSoC if args.with_ethernet else BaseSoC
     soc = cls(**soc_sdram_argdict(args))
-    
     builder = Builder(soc, **builder_argdict(args))
     builder.build(**vivado_build_argdict(args))
 
