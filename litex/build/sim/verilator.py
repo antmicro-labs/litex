@@ -7,7 +7,7 @@ import sys
 import subprocess
 
 from migen.fhdl.structure import _Fragment
-
+from litex import get_data_mod
 from litex.build import tools
 from litex.build.generic_platform import *
 
@@ -88,7 +88,7 @@ extern "C" void litex_sim_init(void **out)
 
     dut = new Vdut;
 
-    litex_sim_init_tracer(dut, {},{});
+    litex_sim_init_tracer(dut, {}, {});
 
 """.format(trace_start, trace_end)
     for args in platform.sim_requested:
@@ -102,13 +102,15 @@ extern "C" void litex_sim_init(void **out)
 
 
 def _generate_sim_variables(include_paths):
+    tapcfg_dir = get_data_mod("misc", "tapcfg").data_location
     include = ""
     for path in include_paths:
         include += "-I"+path+" "
     content = """\
 SRC_DIR = {}
 INC_DIR = {}
-""".format(core_directory, include)
+TAPCFG_DIRECTORY = {}
+""".format(core_directory, include, tapcfg_dir)
     tools.write_to_file("variables.mak", content)
 
 
@@ -117,20 +119,20 @@ def _generate_sim_config(config):
     tools.write_to_file("sim_config.js", content)
 
 
-def _build_sim(build_name, sources, threads, coverage, opt_level="O3"):
+def _build_sim(build_name, sources, threads, coverage, opt_level="O3", trace_fst=False):
     makefile = os.path.join(core_directory, 'Makefile')
     cc_srcs = []
     for filename, language, library in sources:
         cc_srcs.append("--cc " + filename + " ")
     build_script_contents = """\
 rm -rf obj_dir/
-make -C . -f {} {} {} {} {}
-mkdir -p modules && cp obj_dir/*.so modules
+make -C . -f {} {} {} {} {} {}
 """.format(makefile,
     "CC_SRCS=\"{}\"".format("".join(cc_srcs)),
     "THREADS={}".format(threads) if int(threads) > 1 else "",
     "COVERAGE=1" if coverage else "",
     "OPT_LEVEL={}".format(opt_level),
+    "TRACE_FST=1" if trace_fst else "",
     )
     build_script_file = "build_" + build_name + ".sh"
     tools.write_to_file(build_script_file, build_script_contents, force_unix=True)
@@ -169,9 +171,9 @@ def _run_sim(build_name, as_root=False):
 
 class SimVerilatorToolchain:
     def build(self, platform, fragment, build_dir="build", build_name="dut",
-            toolchain_path=None, serial="console", build=True, run=True, threads=1,
+            serial="console", build=True, run=True, threads=1,
             verbose=True, sim_config=None, coverage=False, opt_level="O0",
-            trace=False, trace_start=0, trace_end=-1):
+            trace=False, trace_fst=False, trace_start=0, trace_end=-1):
 
         # create build directory
         os.makedirs(build_dir, exist_ok=True)
@@ -201,7 +203,7 @@ class SimVerilatorToolchain:
                 _generate_sim_config(sim_config)
 
             # build
-            _build_sim(build_name, platform.sources, threads, coverage, opt_level)
+            _build_sim(build_name, platform.sources, threads, coverage, opt_level, trace_fst)
 
         # run
         if run:

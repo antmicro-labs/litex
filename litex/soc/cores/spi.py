@@ -1,4 +1,4 @@
-# This file is Copyright (c) 2019 Florent Kermarrec <florent@enjoy-digital.fr>
+# This file is Copyright (c) 2019-2020 Florent Kermarrec <florent@enjoy-digital.fr>
 # License: BSD
 
 import math
@@ -17,7 +17,8 @@ class SPIMaster(Module, AutoCSR):
     configurable data_width and frequency.
     """
     pads_layout = [("clk", 1), ("cs_n", 1), ("mosi", 1), ("miso", 1)]
-    def __init__(self, pads, data_width, sys_clk_freq, spi_clk_freq, with_csr=True):
+    def __init__(self, pads, data_width, sys_clk_freq, spi_clk_freq, with_csr=True, mode="raw"):
+        assert mode in ["raw", "aligned"]
         if pads is None:
             pads = Record(self.pads_layout)
         if not hasattr(pads, "cs_n"):
@@ -25,14 +26,15 @@ class SPIMaster(Module, AutoCSR):
         self.pads       = pads
         self.data_width = data_width
 
-        self.start    = Signal()
-        self.length   = Signal(8)
-        self.done     = Signal()
-        self.irq      = Signal()
-        self.mosi     = Signal(data_width)
-        self.miso     = Signal(data_width)
-        self.cs       = Signal(len(pads.cs_n), reset=1)
-        self.loopback = Signal()
+        self.start       = Signal()
+        self.length      = Signal(8)
+        self.done        = Signal()
+        self.irq         = Signal()
+        self.mosi        = Signal(data_width)
+        self.miso        = Signal(data_width)
+        self.cs          = Signal(len(pads.cs_n), reset=1)
+        self.loopback    = Signal()
+        self.clk_divider = Signal(16, reset=math.ceil(sys_clk_freq/spi_clk_freq))
 
         if with_csr:
             self.add_csr()
@@ -44,8 +46,7 @@ class SPIMaster(Module, AutoCSR):
         shift = Signal()
 
         # Clock generation -------------------------------------------------------------------------
-        clk_divide  = math.ceil(sys_clk_freq/spi_clk_freq)
-        clk_divider = Signal(max=clk_divide)
+        clk_divider = Signal(16)
         clk_rise    = Signal()
         clk_fall    = Signal()
         self.sync += [
@@ -57,8 +58,8 @@ class SPIMaster(Module, AutoCSR):
                 clk_divider.eq(clk_divider + 1)
             )
         ]
-        self.comb += clk_rise.eq(clk_divider == (clk_divide//2 - 1))
-        self.comb += clk_fall.eq(clk_divider == (clk_divide - 1))
+        self.comb += clk_rise.eq(clk_divider == (self.clk_divider[1:] - 1))
+        self.comb += clk_fall.eq(clk_divider == (self.clk_divider - 1))
 
         # Control FSM ------------------------------------------------------------------------------
         self.submodules.fsm = fsm = FSM(reset_state="IDLE")
@@ -96,43 +97,50 @@ class SPIMaster(Module, AutoCSR):
             for i in range(len(pads.cs_n)):
                 self.comb += pads.cs_n[i].eq(~self.cs[i] | ~xfer)
 
-        # Master Out Slave In (MOSI) generation (generated on spi_clk falling edge) ---------------
-        mosi_data = Signal(data_width)
-        self.sync += \
+        # Master Out Slave In (MOSI) generation (generated on spi_clk falling edge) ----------------
+        mosi_data = Array(self.mosi[i] for i in range(data_width))
+        mosi_bit  = Signal(max=data_width)
+        self.sync += [
             If(self.start,
-                mosi_data.eq(self.mosi)
+                mosi_bit.eq(self.length - 1 if mode == "aligned" else data_width - 1),
             ).Elif(clk_rise & shift,
-                mosi_data.eq(Cat(Signal(), mosi_data[:-1]))
-            ).Elif(clk_fall,
-                pads.mosi.eq(mosi_data[-1])
+                mosi_bit.eq(mosi_bit - 1)
+            ),
+            If(clk_fall,
+                pads.mosi.eq(mosi_data[mosi_bit])
             )
+        ]
 
         # Master In Slave Out (MISO) capture (captured on spi_clk rising edge) --------------------
         miso      = Signal()
         miso_data = self.miso
-        self.sync += \
-            If(shift,
-                If(clk_rise,
-                    If(self.loopback,
-                        miso.eq(pads.mosi)
-                    ).Else(
-                        miso.eq(pads.miso)
-                    )
-                ).Elif(clk_fall,
-                    miso_data.eq(Cat(miso, miso_data[:-1]))
+        self.sync += [
+            If(clk_rise & shift,
+                If(self.loopback,
+                    miso.eq(pads.mosi)
+                ).Else(
+                    miso.eq(pads.miso)
                 )
+            ),
+            If(clk_fall & shift,
+                miso_data.eq(Cat(miso, miso_data))
             )
+        ]
 
     def add_csr(self):
         self._control  = CSRStorage(fields=[
-            CSRField("start",  size=1, offset=0, pulse=True),
-            CSRField("length", size=8, offset=8)])
+            CSRField("start",  size=1, offset=0, pulse=True, description="Write ``1`` to start SPI Xfer"),
+            CSRField("length", size=8, offset=8, description="SPI Xfer length (in bits).")
+        ], description="SPI Control.")
         self._status   = CSRStatus(fields=[
-            CSRField("done", size=1, offset=0)])
-        self._mosi     = CSRStorage(self.data_width)
-        self._miso     = CSRStatus(self.data_width)
-        self._cs       = CSRStorage(len(self.cs), reset=1)
-        self._loopback = CSRStorage()
+            CSRField("done", size=1, offset=0, description="SPI Xfer done when read as ``1``.")
+        ], description="SPI Status.")
+        self._mosi     = CSRStorage(self.data_width, reset_less=True, description="SPI MOSI data (MSB-first serialization).")
+        self._miso     = CSRStatus(self.data_width,  description="SPI MISO data (MSB-first de-serialization).")
+        self._cs       = CSRStorage(fields=[
+            CSRField("sel", len(self.cs), reset=1, description="Write ``1`` to corresponding bit to enable Xfer for chip.")
+        ], description="SPI Chip Select.")
+        self._loopback = CSRStorage(description="SPI loopback mode.\n\n Write ``1`` to enable MOSI to MISO internal loopback.")
 
         self.comb += [
             self.start.eq(self._control.fields.start),
@@ -144,6 +152,10 @@ class SPIMaster(Module, AutoCSR):
             self._status.fields.done.eq(self.done),
             self._miso.status.eq(self.miso),
         ]
+
+    def add_clk_divider(self):
+        self._clk_divider = CSRStorage(16, description="SPI Clk Divider.", reset=self.clk_divider.reset)
+        self.comb += self.clk_divider.eq(self._clk_divider.storage)
 
 # SPI Slave ----------------------------------------------------------------------------------------
 

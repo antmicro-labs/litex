@@ -1,6 +1,6 @@
 # This file is Copyright (c) 2016-2019 Florent Kermarrec <florent@enjoy-digital.fr>
 # This file is Copyright (c) 2018 Sergiusz Bazanski <q3k@q3k.org>
-# This file is Copyright (c) 2019 Mateusz Holenko <mholenko@antmicro.com>
+# This file is Copyright (c) 2019 Antmicro <www.antmicro.com>
 # This file is Copyright (c) 2019 Tim 'mithro' Ansell <me@mith.ro>
 # This file is Copyright (c) 2018 William D. Jones <thor0505@comcast.net>
 # License: BSD
@@ -11,8 +11,9 @@ import os
 
 from migen import *
 
+from litex import get_data_mod
 from litex.soc.interconnect import wishbone
-from litex.soc.cores.cpu import CPU
+from litex.soc.cores.cpu import CPU, CPU_GCC_TRIPLE_RISCV64
 
 
 CPU_VARIANTS = ["minimal", "standard"]
@@ -32,10 +33,12 @@ GCC_FLAGS = {
 
 class PicoRV32(CPU):
     name                 = "picorv32"
+    human_name           = "PicoRV32"
     data_width           = 32
     endianness           = "little"
-    gcc_triple           = ("riscv64-unknown-elf", "riscv32-unknown-elf", "riscv-none-embed")
+    gcc_triple           = CPU_GCC_TRIPLE_RISCV64
     linker_output_format = "elf32-littleriscv"
+    nop                  = "nop"
     io_regions           = {0x80000000: 0x80000000} # origin, length
 
     @property
@@ -55,13 +58,14 @@ class PicoRV32(CPU):
 
     def __init__(self, platform, variant="standard"):
         assert variant in CPU_VARIANTS, "Unsupported variant %s" % variant
-        self.platform  = platform
-        self.variant   = variant
-        self.reset     = Signal()
-        self.idbus     = idbus = wishbone.Interface()
-        self.buses     = [idbus]
-        self.interrupt = Signal(32)
-        self.trap      = Signal()
+        self.platform     = platform
+        self.variant      = variant
+        self.trap         = Signal()
+        self.reset        = Signal()
+        self.interrupt    = Signal(32)
+        self.idbus        = idbus = wishbone.Interface()
+        self.periph_buses = [idbus]
+        self.memory_buses = []
 
         # # #
 
@@ -178,8 +182,7 @@ class PicoRV32(CPU):
 
     @staticmethod
     def add_sources(platform):
-        vdir = os.path.join(
-            os.path.abspath(os.path.dirname(__file__)), "verilog")
+        vdir = get_data_mod("cpu", "picorv32").data_location
         platform.add_source(os.path.join(vdir, "picorv32.v"))
 
     def do_finalize(self):

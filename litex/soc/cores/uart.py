@@ -1,5 +1,5 @@
 # This file is Copyright (c) 2014 Yann Sionneau <ys@m-labs.hk>
-# This file is Copyright (c) 2015-2018 Florent Kermarrec <florent@enjoy-digital.fr>
+# This file is Copyright (c) 2015-2020 Florent Kermarrec <florent@enjoy-digital.fr>
 # This file is Copyright (c) 2015 Sebastien Bourdeauducq <sb@m-labs.hk>
 # This file is Copyright (c) 2018 Tim 'mithro' Ansell <me@mith.ro>
 # License: BSD
@@ -13,13 +13,20 @@ from litex.soc.interconnect.csr_eventmanager import *
 from litex.soc.interconnect import stream
 from litex.soc.interconnect.wishbonebridge import WishboneStreamingBridge
 
-# RS232 PHY ----------------------------------------------------------------------------------------
+# Common -------------------------------------------------------------------------------------------
 
-class RS232PHYInterface:
+def UARTPads():
+    return Record([("tx", 1), ("rx", 1)])
+
+class UARTInterface:
     def __init__(self):
-        self.sink = stream.Endpoint([("data", 8)])
+        self.sink   = stream.Endpoint([("data", 8)])
         self.source = stream.Endpoint([("data", 8)])
 
+# RS232 PHY ----------------------------------------------------------------------------------------
+
+class RS232PHYInterface(UARTInterface):
+    pass
 
 class RS232PHYRX(Module):
     def __init__(self, pads, tuning_word):
@@ -27,17 +34,17 @@ class RS232PHYRX(Module):
 
         # # #
 
-        uart_clk_rxen = Signal()
-        phase_accumulator_rx = Signal(32)
+        uart_clk_rxen        = Signal()
+        phase_accumulator_rx = Signal(32, reset_less=True)
 
-        rx = Signal()
+        rx          = Signal()
+        rx_r        = Signal()
+        rx_reg      = Signal(8, reset_less=True)
+        rx_bitcount = Signal(4, reset_less=True)
+        rx_busy     = Signal()
+        rx_done     = self.source.valid
+        rx_data     = self.source.data
         self.specials += MultiReg(pads.rx, rx)
-        rx_r = Signal()
-        rx_reg = Signal(8)
-        rx_bitcount = Signal(4)
-        rx_busy = Signal()
-        rx_done = self.source.valid
-        rx_data = self.source.data
         self.sync += [
             rx_done.eq(0),
             rx_r.eq(rx),
@@ -79,14 +86,14 @@ class RS232PHYTX(Module):
 
         # # #
 
-        uart_clk_txen = Signal()
-        phase_accumulator_tx = Signal(32)
+        uart_clk_txen        = Signal()
+        phase_accumulator_tx = Signal(32, reset_less=True)
 
         pads.tx.reset = 1
 
-        tx_reg = Signal(8)
-        tx_bitcount = Signal(4)
-        tx_busy = Signal()
+        tx_reg      = Signal(8, reset_less=True)
+        tx_bitcount = Signal(4, reset_less=True)
+        tx_busy     = Signal()
         self.sync += [
             self.sink.ready.eq(0),
             If(self.sink.valid & ~tx_busy & ~self.sink.ready,
@@ -119,7 +126,7 @@ class RS232PHYTX(Module):
 
 class RS232PHY(Module, AutoCSR):
     def __init__(self, pads, clk_freq, baudrate=115200):
-        self._tuning_word = CSRStorage(32, reset=int((baudrate/clk_freq)*2**32))
+        self._tuning_word  = CSRStorage(32, reset=int((baudrate/clk_freq)*2**32))
         self.submodules.tx = RS232PHYTX(pads, self._tuning_word.storage)
         self.submodules.rx = RS232PHYRX(pads, self._tuning_word.storage)
         self.sink, self.source = self.tx.sink, self.rx.source
@@ -145,7 +152,7 @@ class RS232PHYMultiplexer(Module):
 
 class RS232PHYModel(Module):
     def __init__(self, pads):
-        self.sink = stream.Endpoint([("data", 8)])
+        self.sink   = stream.Endpoint([("data", 8)])
         self.source = stream.Endpoint([("data", 8)])
 
         self.comb += [
@@ -180,13 +187,14 @@ def UARTPHY(pads, clk_freq, baudrate):
     else:
         return  RS232PHY(pads, clk_freq, baudrate)
 
-class UART(Module, AutoCSR):
-    def __init__(self, phy,
-                 tx_fifo_depth=16,
-                 rx_fifo_depth=16,
-                 phy_cd="sys"):
-        self._rxtx = CSR(8)
-        self._txfull = CSRStatus()
+class UART(Module, AutoCSR, UARTInterface):
+    def __init__(self, phy=None,
+                 tx_fifo_depth = 16,
+                 rx_fifo_depth = 16,
+                 rx_fifo_rx_we = False,
+                 phy_cd        = "sys"):
+        self._rxtx    = CSR(8)
+        self._txfull  = CSRStatus()
         self._rxempty = CSRStatus()
 
         self.submodules.ev = EventManager()
@@ -195,6 +203,15 @@ class UART(Module, AutoCSR):
         self.ev.finalize()
 
         # # #
+
+        UARTInterface.__init__(self)
+
+        # PHY
+        if phy is not None:
+            self.comb += [
+                phy.source.connect(self.sink),
+                self.source.connect(phy.sink)
+            ]
 
         # TX
         tx_fifo = _get_uart_fifo(tx_fifo_depth, source_cd=phy_cd)
@@ -204,7 +221,7 @@ class UART(Module, AutoCSR):
             tx_fifo.sink.valid.eq(self._rxtx.re),
             tx_fifo.sink.data.eq(self._rxtx.r),
             self._txfull.status.eq(~tx_fifo.sink.ready),
-            tx_fifo.source.connect(phy.sink),
+            tx_fifo.source.connect(self.source),
             # Generate TX IRQ when tx_fifo becomes non-full
             self.ev.tx.trigger.eq(~tx_fifo.sink.ready)
         ]
@@ -214,45 +231,20 @@ class UART(Module, AutoCSR):
         self.submodules += rx_fifo
 
         self.comb += [
-            phy.source.connect(rx_fifo.sink),
+            self.sink.connect(rx_fifo.sink),
             self._rxempty.status.eq(~rx_fifo.source.valid),
             self._rxtx.w.eq(rx_fifo.source.data),
-            rx_fifo.source.ready.eq(self.ev.rx.clear),
+            rx_fifo.source.ready.eq(self.ev.rx.clear | (rx_fifo_rx_we & self._rxtx.we)),
             # Generate RX IRQ when tx_fifo becomes non-empty
             self.ev.rx.trigger.eq(~rx_fifo.source.valid)
         ]
-
-
-class UARTStub(Module, AutoCSR):
-    def __init__(self):
-        self._rxtx = CSR(8)
-        self._txfull = CSRStatus()
-        self._rxempty = CSRStatus()
-
-        self.submodules.ev = EventManager()
-        self.ev.tx = EventSourceProcess()
-        self.ev.rx = EventSourceProcess()
-        self.ev.finalize()
-
-        # # #
-
-        self.comb += [
-            self._txfull.status.eq(0),
-            self.ev.tx.trigger.eq(~(self._rxtx.re & self._rxtx.r)),
-            self._rxempty.status.eq(1)
-        ]
-
 
 class UARTWishboneBridge(WishboneStreamingBridge):
     def __init__(self, pads, clk_freq, baudrate=115200):
         self.submodules.phy = RS232PHY(pads, clk_freq, baudrate)
         WishboneStreamingBridge.__init__(self, self.phy, clk_freq)
 
-# UART Mutltiplexer --------------------------------------------------------------------------------
-
-def UARTPads():
-    return Record([("tx", 1), ("rx", 1)])
-
+# UART Multiplexer ---------------------------------------------------------------------------------
 
 class UARTMultiplexer(Module):
     def __init__(self, uarts, uart):
@@ -267,3 +259,21 @@ class UARTMultiplexer(Module):
                 uarts[n].rx.eq(uart.rx)
             ]
         self.comb += Case(self.sel, cases)
+
+# UART Crossover -----------------------------------------------------------------------------------
+
+class UARTCrossover(UART):
+    """
+    UART crossover trough Wishbone bridge.
+
+    Creates a fully compatible UART that can be used by the CPU as a regular UART and adds a second
+    UART, cross-connected to the main one to allow terminal emulation over a Wishbone bridge.
+    """
+    def __init__(self, **kwargs):
+        assert kwargs.get("phy", None) == None
+        UART.__init__(self, **kwargs)
+        self.submodules.xover = UART(tx_fifo_depth=1, rx_fifo_depth=1, rx_fifo_rx_we=True)
+        self.comb += [
+            self.source.connect(self.xover.sink),
+            self.xover.source.connect(self.sink)
+        ]

@@ -1,6 +1,6 @@
 # This file is Copyright (c) 2014-2015 Robert Jordens <jordens@gmail.com>
 # This file is Copyright (c) 2019 bunnie <bunnie@kosagi.com>
-# This file is Copyright (c) 2019 Florent Kermarrec <florent@enjoy-digital.fr>
+# This file is Copyright (c) 2019-2020 Florent Kermarrec <florent@enjoy-digital.fr>
 # License: BSD
 
 from migen import *
@@ -13,17 +13,21 @@ analog_layout = [("vauxp", 16), ("vauxn", 16), ("vp", 1), ("vn", 1)]
 
 class XADC(Module, AutoCSR):
     def __init__(self, analog_pads=None):
-        # Temperature(°C) = adc_value*503.975/4096 - 273.15
-        self.temperature = CSRStatus(12)
+        # Temperature
+        self.temperature = CSRStatus(12, description="""Raw Temperature value from XADC.\n
+            Temperature (°C) = ``Value`` x 503.975 / 4096 - 273.15.""")
 
-        # Voltage(V) = adc_value*)/4096*3
-        self.vccint  = CSRStatus(12)
-        self.vccaux  = CSRStatus(12)
-        self.vccbram = CSRStatus(12)
+        # Voltages
+        self.vccint  = CSRStatus(12, description="""Raw VCCINT value from XADC.\n
+            VCCINT (V) = ``Value`` x 3 / 4096.""")
+        self.vccaux  = CSRStatus(12, description="""Raw VCCAUX value from XADC.\n
+            VCCAUX (V) = ``Value`` x 3 / 4096.""")
+        self.vccbram = CSRStatus(12, description="""Raw VCCBRAM value from XADC.\n
+            VCCBRAM (V) = ``Value`` x 3 / 4096.""")
 
         # End of Convertion/Sequence
-        self.eoc = CSRStatus()
-        self.eos = CSRStatus()
+        self.eoc = CSRStatus(description="End of Convertion Status, ``1``: Convertion Done.")
+        self.eos = CSRStatus(description="End of Sequence Status, ``1``: Sequence Done.")
 
         # Alarms
         self.alarm = Signal(8)
@@ -43,6 +47,7 @@ class XADC(Module, AutoCSR):
         self.dadr = Signal(7)
         self.di   = Signal(16)
         self.do   = Signal(16)
+        self.drp_en = Signal()
         self.specials += Instance("XADC",
             # From ug480
             p_INIT_40=0x9000, p_INIT_41=0x2ef0, p_INIT_42=0x0400,
@@ -77,8 +82,10 @@ class XADC(Module, AutoCSR):
             o_DO        = self.do
         )
         self.comb += [
-            self.den.eq(eoc),
-            self.dadr.eq(channel),
+            If(~self.drp_en,
+                self.den.eq(eoc),
+                self.dadr.eq(channel),
+            )
         ]
 
         # Channels update --------------------------------------------------------------------------
@@ -107,22 +114,26 @@ class XADC(Module, AutoCSR):
         self.drp_read   = CSR()
         self.drp_write  = CSR()
         self.drp_drdy   = CSRStatus()
-        self.drp_adr    = CSRStorage(7)
-        self.drp_dat_w  = CSRStorage(16)
+        self.drp_adr    = CSRStorage(7,  reset_less=True)
+        self.drp_dat_w  = CSRStorage(16, reset_less=True)
         self.drp_dat_r  = CSRStatus(16)
 
         # # #
 
+        den_pipe = Signal() # add a register to ease timing closure of den
+
         self.comb += [
-            self.dwe.eq(self.drp_write.re),
             self.di.eq(self.drp_dat_w.storage),
             self.drp_dat_r.status.eq(self.do),
-            If(self.drp_enable.storage,
-                self.den.eq(self.drp_read.re | self.drp_write.re),
-                self.dadr.eq(self.drp_adr.storage),
-            ),
+            If(self.drp_en,
+               self.den.eq(den_pipe),
+               self.dadr.eq(self.drp_adr.storage),
+            )
         ]
         self.sync += [
+            self.dwe.eq(self.drp_write.re),
+            self.drp_en.eq(self.drp_enable.storage),
+            den_pipe.eq(self.drp_read.re | self.drp_write.re),
             If(self.drp_read.re | self.drp_write.re,
                 self.drp_drdy.status.eq(0)
             ).Elif(self.drdy,

@@ -48,6 +48,13 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
         System Interface
         ----------------
 
+        Audio interchange is done with the system using 16-bit stereo samples, with the right channel
+        mapped to the least significant word of a 32-bit word. Thus each 32-bit word is a single
+        stereo sample. As this is a slave I2S interface, sampling rate and framing is set by the
+        programming of the audio CODEC chip. A slave situation is preferred because this defers the
+        generation of audio clocks to the CODEC, which has PLLs specialized to generate the correct
+        frequencies for audio sampling rates.
+
         `fifo_depth` is the depth at which either a read interrupt is fired (guaranteeing at least
         `fifo_depth` stereo samples in the receive FIFO) or a write interrupt is fired (guaranteeing
         at least `fifo_depth` free space in the transmit FIFO). The maximum depth is 512.
@@ -107,8 +114,8 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
         - Tx is data to the codec (SDI pin on LM49352)
         - Rx is data from the codec (SDO pin on LM49352)
         """)
-         
-      # One cache line is 8 32-bit words, need to always have enough space for one line or else
+
+        # One cache line is 8 32-bit words, need to always have enough space for one line or else
         # nothing works
         if fifo_depth > 504:
             fifo_depth = 504
@@ -159,7 +166,6 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             )
         ]
 
-
         if master == True:
             if bits_per_channel < sample_width and frame_format == I2S_FORMAT.I2S_STANDARD:
                 bits_per_channel = sample_width+1
@@ -186,7 +192,6 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                        sclk_counter.eq(sclk_counter + 1)
                     )
             ]
-
         # Interrupts
         self.submodules.ev = EventManager()
         if hasattr(pads, 'rx'):
@@ -219,7 +224,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                 ])
             self.rx_stat = CSRStatus(description="Rx data path status",
                 fields=[
-                    CSRField("overflow", size=1, description="Rx overflow"),
+                    CSRField("overflow",  size=1, description="Rx overflow"),
                     CSRField("underflow", size=1, description="Rx underflow"),
                     CSRField("dataready", size=1, description="{} words of data loaded and ready to read".format(fifo_depth)),
                     CSRField("empty",     size=1, description="No data available in FIFO to read"), # next flags probably never used
@@ -245,7 +250,6 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                     )
                 )
             ]
-
             # At a width of 32 bits, an 18kiB fifo is 512 entries deep
             self.specials += Instance("FIFO_SYNC_MACRO",
                 p_DEVICE              = "7SERIES",
@@ -270,6 +274,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                 o_WRERR       = rx_wrerr,
             )
             self.comb += [  # Wire up the status signals and interrupts
+                self.rx_stat.fields.overflow.eq(rx_wrerr),
                 self.rx_stat.fields.underflow.eq(rx_rderr),
                 self.rx_stat.fields.dataready.eq(rx_almostfull),
                 self.rx_stat.fields.wrcount.eq(rx_wrcount),
@@ -304,7 +309,6 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             rx_cnt = Signal(rx_cnt_width)
             rx_delay_cnt = Signal()
             rx_delay_val = 1 if frame_format == I2S_FORMAT.I2S_STANDARD else 0 
-
             self.submodules.rxi2s = rxi2s = FSM(reset_state="IDLE")
             rxi2s.act("IDLE",
                 NextValue(rx_wr_d, 0),
@@ -444,7 +448,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                 ])
             self.tx_stat = CSRStatus(description="Tx data path status",
                 fields=[
-                    CSRField("overflow",  size=1, description="Tx overflow"),
+                    CSRField("overflow",   size=1, description="Tx overflow"),
                     CSRField("underflow",  size=1, description="Tx underflow"),
                     CSRField("free",       size=1, description="At least {} words of space free".format(fifo_depth)),
                     CSRField("almostfull", size=1, description="Less than 8 words space available"), # the next few flags should be rarely used
@@ -470,7 +474,6 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                     )
                 )
             ]
-
             # At a width of 32 bits, an 18kiB fifo is 512 entries deep
             self.specials += Instance("FIFO_SYNC_MACRO",
                 p_DEVICE              = "7SERIES",
@@ -496,6 +499,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             )
 
             self.comb += [  # Wire up the status signals and interrupts
+                self.tx_stat.fields.overflow.eq(tx_wrerr),
                 self.tx_stat.fields.underflow.eq(tx_rderr),
                 self.tx_stat.fields.free.eq(tx_almostempty),
                 self.tx_stat.fields.almostfull.eq(tx_almostfull),
@@ -508,7 +512,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             ]
             self.sync += [
                 # This is the bus responder -- need to check how this interacts with uncached memory
-                # region 
+                # region
                 If(bus.cyc & bus.stb & bus.we & ~bus.ack,
                    If(~tx_full,
                       tx_wr_d.eq(bus.dat_w),
@@ -597,7 +601,6 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
                         )
                     )
                 )
-
             txi2s.act("RIGHT",
                 If(~self.tx_ctl.fields.enable,
                     NextState("IDLE")

@@ -18,46 +18,82 @@ class CPU(Module):
     interrupts           = {}
     mem_map              = {}
     io_regions           = {}
+    use_rom              = False
+    def __init__(self, *args, **kwargs):
+        pass
 
 class CPUNone(CPU):
     data_width           = 32
     reset_address        = 0x00000000
-    io_regions           = {0x00000000: 0xf0000000} # origin, length
+    io_regions           = {0x00000000: 0x100000000} # origin, length
+    periph_buses         = []
+    memory_buses         = []
+
+CPU_GCC_TRIPLE_RISCV32 = (
+    "riscv64-unknown-elf",
+    "riscv32-unknown-elf",
+    "riscv-none-embed",
+    "riscv64-linux",
+    "riscv-sifive-elf",
+    "riscv64-none-elf",
+)
+
+CPU_GCC_TRIPLE_RISCV64 = (
+    "riscv64-unknown-elf",
+    "riscv64-linux",
+    "riscv-sifive-elf",
+    "riscv64-none-elf",
+)
 
 # CPUS ---------------------------------------------------------------------------------------------
 
 from litex.soc.cores.cpu.lm32 import LM32
 from litex.soc.cores.cpu.mor1kx import MOR1KX
-from litex.soc.cores.cpu.picorv32 import PicoRV32
-from litex.soc.cores.cpu.vexriscv import VexRiscv
-from litex.soc.cores.cpu.minerva import Minerva
-from litex.soc.cores.cpu.rocket import RocketRV64
 from litex.soc.cores.cpu.microwatt import Microwatt
+from litex.soc.cores.cpu.serv import SERV
+from litex.soc.cores.cpu.picorv32 import PicoRV32
+from litex.soc.cores.cpu.minerva import Minerva
+from litex.soc.cores.cpu.vexriscv import VexRiscv
+from litex.soc.cores.cpu.rocket import RocketRV64
+from litex.soc.cores.cpu.blackparrot import BlackParrotRV64
 
 CPUS = {
-    "lm32"       : LM32,
-    "mor1kx"     : MOR1KX,
-    "picorv32"   : PicoRV32,
-    "vexriscv"   : VexRiscv,
-    "minerva"    : Minerva,
-    "rocket"     : RocketRV64,
-    "microwatt"  : Microwatt,
+    # None
+    "None"        : CPUNone,
+
+    # LM32
+    "lm32"        : LM32,
+
+    # OpenRisc
+    "mor1kx"      : MOR1KX,
+
+    # Open Power
+    "microwatt"   : Microwatt,
+
+    # RISC-V 32-bit
+    "serv"        : SERV,
+    "picorv32"    : PicoRV32,
+    "minerva"     : Minerva,
+    "vexriscv"    : VexRiscv,
+
+    # RISC-V 64-bit
+    "rocket"      : RocketRV64,
+    "blackparrot" : BlackParrotRV64,
 }
 
 # CPU Variants/Extensions Definition ---------------------------------------------------------------
 
 CPU_VARIANTS = {
     # "official name": ["alias 1", "alias 2"],
-    "minimal" : ["min",],
-    "lite" : ["light", "zephyr", "nuttx"],
-    "standard": [None, "std"],
-    "full": [],
-    "linux" : [],
-    "linuxd" : [],
-    "linuxq" : [],
+    "minimal" :   ["min",],
+    "lite" :      ["light", "zephyr", "nuttx"],
+    "standard":   [None, "std"],
+    "full":       [],
+    "linux" :     [],
+    "linuxd" :    [],
+    "linuxq" :    [],
 }
 CPU_VARIANTS_EXTENSIONS = ["debug", "no-dsp"]
-
 
 class InvalidCPUVariantError(ValueError):
     def __init__(self, variant):
@@ -88,6 +124,8 @@ def check_format_cpu_variant(variant):
 	# Support the old style which used underscore for separator
     if variant is None:
         variant = "standard"
+    if variant == "debug":
+        variant = "standard+debug"
     variant = variant.replace('_', '+')
 
     # Check for valid CPU variants.

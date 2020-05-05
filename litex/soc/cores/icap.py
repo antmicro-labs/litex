@@ -18,10 +18,10 @@ class ICAP(Module, AutoCSR):
     reloaded from SPI Flash by writing 0x00000000 at address @0x4.
     """
     def __init__(self, simulation=False):
-        self.addr = CSRStorage(5)
-        self.data = CSRStorage(32)
-        self.send = CSR()
-        self.done = CSRStatus(reset=1)
+        self.addr = CSRStorage(5,  reset_less=True, description="ICAP Write Address.")
+        self.data = CSRStorage(32, reset_less=True, description="ICAP Write Data.")
+        self.send = CSRStorage(description="ICAP Control.\n\n Write ``1`` send a write command to the ICAP.")
+        self.done = CSRStatus(reset=1, description="ICAP Status.\n\n Write command done when read as ``1``.")
 
         # # #
 
@@ -73,6 +73,10 @@ class ICAP(Module, AutoCSR):
                 )
             ]
 
+    def add_timing_constraints(self, platform, sys_clk_freq, sys_clk):
+        platform.add_period_constraint(self.cd_icap.clk, 16*1e9/sys_clk_freq)
+        platform.add_false_path_constraints(self.cd_icap.clk, sys_clk)
+
 
 class ICAPBitstream(Module, AutoCSR):
     """ICAP Bitstream
@@ -87,7 +91,7 @@ class ICAPBitstream(Module, AutoCSR):
     the ICAPE2.
     """
     def __init__(self, fifo_depth=8, icap_clk_div=4, simulation=False):
-        self.sink_data  = CSRStorage(32)
+        self.sink_data  = CSRStorage(32, reset_less=True)
         self.sink_ready = CSRStatus()
 
         # # #
@@ -130,3 +134,7 @@ class ICAPBitstream(Module, AutoCSR):
                     i_I=Cat(*[_i[8*i:8*(i+1)][::-1] for i in range(4)]),
                 )
             ]
+
+    def add_timing_constraints(self, platform, sys_clk_freq, sys_clk):
+        platform.add_period_constraint(self.cd_icap.clk, 16*1e9/sys_clk_freq)
+        platform.add_false_path_constraints(self.cd_icap.clk, sys_clk)

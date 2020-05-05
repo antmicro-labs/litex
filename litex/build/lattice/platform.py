@@ -23,7 +23,7 @@ class LatticePlatform(GenericPlatform):
             raise ValueError("Unknown toolchain")
 
     def get_verilog(self, *args, special_overrides=dict(), **kwargs):
-        so = dict()  # No common overrides between ECPX and iCE40.
+        so = dict()  # No common overrides between ECP5 and iCE40.
         so.update(self.toolchain.special_overrides)
         so.update(special_overrides)
         return GenericPlatform.get_verilog(self, *args, special_overrides=so,
@@ -34,6 +34,14 @@ class LatticePlatform(GenericPlatform):
         return self.toolchain.build(self, *args, **kwargs)
 
     def add_period_constraint(self, clk, period):
+        if clk is None: return
         if hasattr(clk, "p"):
             clk = clk.p
         self.toolchain.add_period_constraint(self, clk, period)
+
+    def add_false_path_constraint(self, from_, to):
+        if hasattr(from_, "p"):
+            from_ = from_.p
+        if hasattr(to, "p"):
+            to = to.p
+        self.toolchain.add_false_path_constraint(self, from_, to)

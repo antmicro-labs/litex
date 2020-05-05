@@ -1,8 +1,16 @@
 include variables.mak
+UNAME_S := $(shell uname -s)
 
-CC = gcc
-CFLAGS = -Wall -$(OPT_LEVEL) -ggdb $(if $(COVERAGE), -DVM_COVERAGE)
-LDFLAGS = -lpthread -ljson-c -lm -lstdc++ -ldl -levent
+ifeq ($(UNAME_S),Darwin)
+	CFLAGS += -I/usr/local/include/
+	LDFLAGS += -L/usr/local/lib
+	LDFLAGS += -lpthread -ljson-c -lm -lstdc++ -ldl -levent
+else
+	CC ?= gcc
+	CFLAGS += -Wall -$(OPT_LEVEL) -ggdb $(if $(COVERAGE), -DVM_COVERAGE) $(if $(TRACE_FST), -DTRACE_FST)
+	LDFLAGS += -lpthread -Wl,--no-as-needed -ljson-c -lm -lstdc++ -Wl,--no-as-needed -ldl -levent
+endif
+
 
 CC_SRCS ?= "--cc dut.v"
 
@@ -21,11 +29,11 @@ all: modules sim
 mkdir:
 	mkdir -p $(OBJ_DIR)
 
-$(OBJS_SIM): %.o: $(SRC_DIR)/%.c
+$(OBJS_SIM): %.o: $(SRC_DIR)/%.c | mkdir
 	$(CC) -c $(CFLAGS) -o $(OBJ_DIR)/$@ $<
 
 .PHONY: sim
-sim: mkdir $(OBJS_SIM)
+sim: $(OBJS_SIM) | mkdir
 	verilator -Wno-fatal -O3 $(CC_SRCS) --top-module dut --exe \
 		-DPRINTF_COND=0 \
 		$(SRCS_SIM_CPP) $(OBJS_SIM) \
@@ -34,6 +42,7 @@ sim: mkdir $(OBJS_SIM)
 		-CFLAGS "$(CFLAGS) -I$(SRC_DIR)" \
 		-LDFLAGS "$(LDFLAGS)" \
 		--trace \
+		$(if $(TRACE_FST), --trace-fst,) \
 		$(if $(COVERAGE), --coverage,) \
 		--unroll-count 256 \
 		$(INC_DIR) \
@@ -42,8 +51,9 @@ sim: mkdir $(OBJS_SIM)
 	make -j -C $(OBJ_DIR) -f Vdut.mk Vdut
 
 .PHONY: modules
-modules: mkdir
-	$(MAKE) -C $(MOD_DIR)
+modules:
+	mkdir -p modules
+	$(MAKE) -C modules -f $(MOD_DIR)/Makefile
 
 .PHONY: clean
 clean:
