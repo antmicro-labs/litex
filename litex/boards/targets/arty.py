@@ -54,7 +54,7 @@ class _CRG(Module):
         pll.create_clkout(self.cd_sys4x_dqs, 4*sys_clk_freq, phase=90)
         pll.create_clkout(self.cd_clk200,    200e6)
         pll.create_clkout(self.cd_eth,       25e6)
-        pll2.create_clkout(self.cd_i2s_rx,    11.289e6)
+        pll2.create_clkout(self.cd_i2s_rx,   11.289e6)
         pll2.create_clkout(self.cd_i2s_tx,   22.579e6)
 
 
@@ -110,28 +110,16 @@ class BaseSoC(SoCCore):
             self.add_csr("ethphy")
             self.add_etherbone(phy=self.ethphy)
 
-# EthernetSoC --------------------------------------------------------------------------------------
+# SoundSoC --------------------------------------------------------------------------------------
 
-class EthernetSoC(BaseSoC):
+class SoundSoC(BaseSoC):
     mem_map = {
-        "ethmac": 0xb0000000,
         "i2s_rx": 0xb1000000,
         "i2s_tx": 0xb2000000
     }
     mem_map.update(BaseSoC.mem_map)
-
     def __init__(self, **kwargs):
-        BaseSoC.__init__(self, integrated_rom_size=0x10000, **kwargs)
-
-        self.submodules.ethphy = LiteEthPHYMII(self.platform.request("eth_clocks"),
-                                               self.platform.request("eth"))
-        self.add_csr("ethphy")
-        self.submodules.ethmac = LiteEthMAC(phy=self.ethphy, dw=32,
-            interface="wishbone", endianness=self.cpu.endianness)
-        self.add_wb_slave(self.mem_map["ethmac"], self.ethmac.bus, 0x2000)
-        self.add_memory_region("ethmac", self.mem_map["ethmac"], 0x2000, type="io")
-        self.add_csr("ethmac")
-        self.add_interrupt("ethmac")
+        BaseSoC.__init__(self, **kwargs)
         # I2S --------------------------------------------------------------------------------------
         i2s_mem_size=0x40000;
         # i2s rx
@@ -153,18 +141,10 @@ class EthernetSoC(BaseSoC):
             master=True,
             concatenate_channels=False
         )
- 
         self.add_memory_region("i2s_tx", self.mem_map["i2s_tx"], i2s_mem_size);
         self.add_wb_slave(self.mem_regions["i2s_tx"].origin, self.i2s_tx.bus, i2s_mem_size)
         self.add_csr("i2s_tx")
         self.add_interrupt("i2s_tx")
-
-        self.platform.add_period_constraint(self.ethphy.crg.cd_eth_rx.clk, 1e9/12.5e6)
-        self.platform.add_period_constraint(self.ethphy.crg.cd_eth_tx.clk, 1e9/12.5e6)
-        self.platform.add_false_path_constraints(
-            self.crg.cd_sys.clk,
-            self.ethphy.crg.cd_eth_rx.clk,
-            self.ethphy.crg.cd_eth_tx.clk)
 
 # Build --------------------------------------------------------------------------------------------
 
@@ -180,7 +160,7 @@ def main():
     args = parser.parse_args()
 
     assert not (args.with_ethernet and args.with_etherbone)
-    soc = BaseSoC(with_ethernet=args.with_ethernet, with_etherbone=args.with_etherbone,
+    soc =SoundSoC(with_ethernet=args.with_ethernet, with_etherbone=args.with_etherbone,
         **soc_sdram_argdict(args))
     builder = Builder(soc, **builder_argdict(args))
     builder.build(**vivado_build_argdict(args), run=args.build)
