@@ -57,7 +57,6 @@ class _CRG(Module):
         pll2.create_clkout(self.cd_i2s_rx,   11.289e6)
         pll2.create_clkout(self.cd_i2s_tx,   22.579e6)
 
-
         self.submodules.idelayctrl = S7IDELAYCTRL(self.cd_clk200)
 
         self.comb += platform.request("eth_ref_clk").eq(self.cd_eth.clk)
