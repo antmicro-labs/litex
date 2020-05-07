@@ -1,5 +1,9 @@
 # This file is Copyright (c) 2020 bunnie <bunnie@kosagi.com>
 # License: BSD
+#
+# Copyright (c) 2020 Antmicro <www.antmicro.com>
+# 
+# SPDX-License-Identifier: Apache-2.0
 
 from migen.genlib.cdc import MultiReg
 
