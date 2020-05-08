@@ -144,6 +144,7 @@ class S7I2SSlave(Module, AutoCSR, AutoDoc):
             if sample_width <= 16:
                 fifo_data_width=sample_width*2
             else:
+                concatenate_channels=False
                 print("I2S warning: sample width greater than 16 bits. your channels can't be glued")
 
 
