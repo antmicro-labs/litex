@@ -60,7 +60,7 @@ class _CRG(Module):
 
         rx_mclk = platform.request("i2s_rx_mclk")
         tx_mclk = platform.request("i2s_tx_mclk")
-        mclk_freq_rx=8192 
+        mclk_freq_rx=4096
         mclk_period_rx=int(sys_clk_freq/(mclk_freq_rx*2))
         mclk_counter = Signal(16)
         self.sync+= [
@@ -134,12 +134,12 @@ class SoundSoC(BaseSoC):
         # i2s rx
         self.submodules.i2s_rx = S7I2SSlave(
             pads=self.platform.request("i2s_rx"),
-            sample_width=16,
+            sample_width=24,
             frame_format=I2S_FORMAT.I2S_STANDARD,
             concatenate_channels=False,
             master=True,
             lrck_freq=16000,
-            bits_per_channel=28
+            bits_per_channel=64
         )
         self.add_memory_region("i2s_rx", self.mem_map["i2s_rx"], i2s_mem_size);
         self.add_wb_slave(self.mem_regions["i2s_rx"].origin, self.i2s_rx.bus, i2s_mem_size)
@@ -148,12 +148,12 @@ class SoundSoC(BaseSoC):
         # i2s tx
         self.submodules.i2s_tx = S7I2SSlave(
             pads=self.platform.request("i2s_tx"),
-            sample_width=16,
+            sample_width=24,
             frame_format=I2S_FORMAT.I2S_STANDARD,
             master=True,
             concatenate_channels=False,
             lrck_freq=16000,
-            bits_per_channel=28
+            bits_per_channel=64
         )
         self.add_memory_region("i2s_tx", self.mem_map["i2s_tx"], i2s_mem_size);
         self.add_wb_slave(self.mem_regions["i2s_tx"].origin, self.i2s_tx.bus, i2s_mem_size)
