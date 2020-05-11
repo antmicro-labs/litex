@@ -60,7 +60,7 @@ class _CRG(Module):
 
         rx_mclk = platform.request("i2s_rx_mclk")
         tx_mclk = platform.request("i2s_tx_mclk")
-        mclk_freq_rx=4096
+        mclk_freq_rx=4.200e6
         mclk_period_rx=int(sys_clk_freq/(mclk_freq_rx*2))
         mclk_counter = Signal(16)
         self.sync+= [
@@ -137,9 +137,9 @@ class SoundSoC(BaseSoC):
             sample_width=24,
             frame_format=I2S_FORMAT.I2S_STANDARD,
             concatenate_channels=False,
-            master=True,
-            lrck_freq=16000,
-            bits_per_channel=64
+            master=False,
+            lrck_freq=32000,
+            bits_per_channel=32
         )
         self.add_memory_region("i2s_rx", self.mem_map["i2s_rx"], i2s_mem_size);
         self.add_wb_slave(self.mem_regions["i2s_rx"].origin, self.i2s_rx.bus, i2s_mem_size)
@@ -153,7 +153,7 @@ class SoundSoC(BaseSoC):
             master=True,
             concatenate_channels=False,
             lrck_freq=16000,
-            bits_per_channel=64
+            bits_per_channel=32
         )
         self.add_memory_region("i2s_tx", self.mem_map["i2s_tx"], i2s_mem_size);
         self.add_wb_slave(self.mem_regions["i2s_tx"].origin, self.i2s_tx.bus, i2s_mem_size)
