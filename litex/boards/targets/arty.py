@@ -134,11 +134,10 @@ class SoundSoC(BaseSoC):
         # i2s rx
         self.submodules.i2s_rx = S7I2SSlave(
             pads=self.platform.request("i2s_rx"),
-            sample_width=24,
+            sample_width=16,
             frame_format=I2S_FORMAT.I2S_STANDARD,
             concatenate_channels=False,
             master=False,
-            lrck_freq=32000,
             bits_per_channel=32
         )
         self.add_memory_region("i2s_rx", self.mem_map["i2s_rx"], i2s_mem_size);
