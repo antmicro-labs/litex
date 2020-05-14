@@ -38,14 +38,11 @@ class _CRG(Module):
         # # #
 
         self.submodules.pll = pll = S7PLL(speedgrade=-1)
-        self.submodules.pll2 = pll2 = S7PLL(speedgrade=-1)
 
         cpu_reset = ~platform.request("cpu_reset")
         clk100 = platform.request("clk100")
         self.comb += pll.reset.eq(cpu_reset)
         pll.register_clkin(clk100, 100e6)
-        self.comb += pll2.reset.eq(cpu_reset)
-        pll2.register_clkin(clk100, 100e6)
 
         pll.create_clkout(self.cd_sys,       sys_clk_freq)
         pll.create_clkout(self.cd_sys2x,     2*sys_clk_freq)
@@ -132,12 +129,13 @@ class SoundSoC(BaseSoC):
         # I2S --------------------------------------------------------------------------------------
         i2s_mem_size=0x40000;
         # i2s rx
-        self.submodules.i2s_rx = S7I2SSlave(
+        self.submodules.i2s_rx = S7I2S(
             pads=self.platform.request("i2s_rx"),
             sample_width=16,
             frame_format=I2S_FORMAT.I2S_STANDARD,
             concatenate_channels=False,
             master=False,
+            lrck_freq=16000,
             bits_per_channel=32
         )
         self.add_memory_region("i2s_rx", self.mem_map["i2s_rx"], i2s_mem_size);
@@ -145,9 +143,9 @@ class SoundSoC(BaseSoC):
         self.add_csr("i2s_rx")
         self.add_interrupt("i2s_rx")
         # i2s tx
-        self.submodules.i2s_tx = S7I2SSlave(
+        self.submodules.i2s_tx = S7I2S(
             pads=self.platform.request("i2s_tx"),
-            sample_width=24,
+            sample_width=16,
             frame_format=I2S_FORMAT.I2S_STANDARD,
             master=True,
             concatenate_channels=False,
