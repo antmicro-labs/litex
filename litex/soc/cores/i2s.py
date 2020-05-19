@@ -546,6 +546,7 @@ class S7I2S(Module, AutoCSR, AutoDoc):
             tx_cnt = Signal(tx_cnt_width)
             tx_buf = Signal(tx_buf_width)
             self.submodules.txi2s = txi2s = FSM(reset_state="IDLE")
+            sample_msb = fifo_data_width - 1
             txi2s.act("IDLE",
                 If(self.tx_ctl.fields.enable,
                     If(falling_edge & (~sync_pin if frame_format == I2S_FORMAT.I2S_STANDARD else sync_pin),
@@ -565,7 +566,7 @@ class S7I2S(Module, AutoCSR, AutoDoc):
                 If(~self.tx_ctl.fields.enable,
                     NextState("IDLE")
                 ).Else(
-                    NextValue(tx_pin, tx_buf[sample_width - 1]),
+                    NextValue(tx_pin, tx_buf[sample_msb]),
                     NextValue(tx_buf, Cat(0, tx_buf[:-1])),
                     NextValue(tx_cnt, tx_cnt - 1),
                     NextState("LEFT_WAIT")
@@ -616,7 +617,7 @@ class S7I2S(Module, AutoCSR, AutoDoc):
                 If(~self.tx_ctl.fields.enable,
                     NextState("IDLE")
                 ).Else(
-                    NextValue(tx_pin, tx_buf[sample_width-1]),
+                    NextValue(tx_pin, tx_buf[sample_msb]),
                     NextValue(tx_buf, Cat(0, tx_buf[:-1])),
                     NextValue(tx_cnt, tx_cnt - 1),
                     NextState("RIGHT_WAIT")
