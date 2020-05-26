@@ -6,47 +6,34 @@ from migen.genlib.cdc import MultiReg
 
 from litex.soc.interconnect.csr import *
 
-# GPIO Input ----------------------------------------------------------------------------------------
 
 class GPIOIn(Module, AutoCSR):
     def __init__(self, signal):
-        self._in = CSRStatus(len(signal), description="GPIO Input(s) Status.")
-        self.specials += MultiReg(signal, self._in.status)
+        sig_len = len(signal)
+        self._in = CSRStatus(sig_len)
+        for i in range(sig_len):
+            self.specials += MultiReg(signal[i], self._in.status[i])
 
-# GPIO Output --------------------------------------------------------------------------------------
 
 class GPIOOut(Module, AutoCSR):
     def __init__(self, signal):
-        self._out = CSRStorage(len(signal), description="GPIO Output(s) Control.")
-        self.comb += signal.eq(self._out.storage)
+        sig_len = len(signal)
+        self._out = CSRStorage(sig_len)
+        for i in range(sig_len):
+            self.comb += signal[i].eq(self._out.storage[i])
 
-# GPIO Input/Output --------------------------------------------------------------------------------
 
 class GPIOInOut(Module):
     def __init__(self, in_signal, out_signal):
-        self.submodules.gpio_in  = GPIOIn(in_signal)
+        self.submodules.gpio_in = GPIOIn(in_signal)
         self.submodules.gpio_out = GPIOOut(out_signal)
 
     def get_csrs(self):
         return self.gpio_in.get_csrs() + self.gpio_out.get_csrs()
 
-# GPIO Tristate ------------------------------------------------------------------------------------
 
-class GPIOTristate(Module, AutoCSR):
-    def __init__(self, pads):
-        nbits     = len(pads)
-        self._oe  = CSRStorage(nbits, description="GPIO Tristate(s) Control.")
-        self._in  = CSRStatus(nbits,  description="GPIO Input(s) Status.")
-        self._out = CSRStorage(nbits, description="GPIO Ouptut(s) Control.")
-
-        # # #
-
-        _pads = Signal(nbits)
-        self.comb += _pads.eq(pads)
-
-        for i in range(nbits):
-            t = TSTriple()
-            self.specials += t.get_tristate(_pads[i])
-            self.comb += t.oe.eq(self._oe.storage[i])
-            self.comb += t.o.eq(self._out.storage[i])
-            self.specials += MultiReg(t.i, self._in.status[i])
+class Blinker(Module):
+    def __init__(self, signal, divbits=26):
+        counter = Signal(divbits)
+        self.comb += signal.eq(counter[divbits-1])
+        self.sync += counter.eq(counter + 1)

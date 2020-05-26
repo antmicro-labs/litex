@@ -115,6 +115,13 @@ class BaseSoC(SoCCore):
                 pads       = self.platform.request("eth"))
             self.add_csr("ethphy")
             self.add_etherbone(phy=self.ethphy)
+        # gpio
+        port_led = []
+        for i in range(4):
+            port_led += [self.platform.request("user_led", i)]
+        self.submodules.port_led = gpio.GPIOOut(port_led)
+        self.add_csr("port_led")
+
 
 # SoundSoC --------------------------------------------------------------------------------------
 
