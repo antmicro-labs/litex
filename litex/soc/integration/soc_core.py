@@ -61,6 +61,11 @@ class SoCCore(LiteXSoC):
     }
 
     def __init__(self, platform, clk_freq,
+        # Bus parameters
+        bus_standard             = "wishbone",
+        bus_data_width           = 32,
+        bus_address_width        = 32,
+        bus_timeout              = 1e6,
         # CPU parameters
         cpu_type                 = "vexriscv",
         cpu_reset_address        = None,
@@ -90,20 +95,18 @@ class SoCCore(LiteXSoC):
         uart_fifo_depth          = 16,
         # Timer parameters
         with_timer               = True,
+        timer_uptime             = False,
         # Controller parameters
         with_ctrl                = True,
-        # Wishbone parameters
-        with_wishbone            = True,
-        wishbone_timeout_cycles  = 1e6,
         # Others
         **kwargs):
 
         # New LiteXSoC class ----------------------------------------------------------------------------
         LiteXSoC.__init__(self, platform, clk_freq,
-            bus_standard         = "wishbone",
-            bus_data_width       = 32,
-            bus_address_width    = 32,
-            bus_timeout          = wishbone_timeout_cycles,
+            bus_standard         = bus_standard,
+            bus_data_width       = bus_data_width,
+            bus_address_width    = bus_address_width,
+            bus_timeout          = bus_timeout,
             bus_reserved_regions = {},
 
             csr_data_width       = csr_data_width,
@@ -125,10 +128,6 @@ class SoCCore(LiteXSoC):
         # Parameters management --------------------------------------------------------------------
         cpu_type          = None if cpu_type == "None" else cpu_type
         cpu_reset_address = None if cpu_reset_address == "None" else cpu_reset_address
-        cpu_variant = cpu.check_format_cpu_variant(cpu_variant)
-
-        if not with_wishbone:
-            self.mem_map["csr"]  = 0x00000000
 
         self.cpu_type                   = cpu_type
         self.cpu_variant                = cpu_variant
@@ -140,9 +139,6 @@ class SoCCore(LiteXSoC):
         self.integrated_main_ram_size   = integrated_main_ram_size
 
         self.csr_data_width             = csr_data_width
-
-        self.with_wishbone              = with_wishbone
-        self.wishbone_timeout_cycles    = wishbone_timeout_cycles
 
         self.wb_slaves = {}
 
@@ -186,10 +182,11 @@ class SoCCore(LiteXSoC):
         # Add Timer
         if with_timer:
             self.add_timer(name="timer0")
+            if timer_uptime:
+                self.timer0.add_uptime()
 
-        # Add Wishbone to CSR bridge
-        if with_wishbone:
-            self.add_csr_bridge(self.mem_map["csr"])
+        # Add CSR bridge
+        self.add_csr_bridge(self.mem_map["csr"])
 
     # Methods --------------------------------------------------------------------------------------
 

@@ -17,10 +17,10 @@
 #include <generated/sdram_phy.h>
 #endif
 #include <generated/mem.h>
-#include <hw/flags.h>
 #include <system.h>
 
 #include "sdram.h"
+#include "lfsr.h"
 
 // FIXME(hack): If we don't have main ram, just target the sram instead.
 #ifndef MAIN_RAM_BASE
@@ -190,6 +190,13 @@ void sdrwlon(void)
 	sdram_dfii_pi0_address_write(DDRX_MR1 | (1 << 7));
 	sdram_dfii_pi0_baddress_write(1);
 	command_p0(DFII_COMMAND_RAS|DFII_COMMAND_CAS|DFII_COMMAND_WE|DFII_COMMAND_CS);
+
+#ifdef SDRAM_PHY_DDR4_RDIMM
+	sdram_dfii_pi0_address_write((DDRX_MR1 | (1 << 7)) ^ 0x2BF8) ;
+	sdram_dfii_pi0_baddress_write(1 ^ 0xF);
+	command_p0(DFII_COMMAND_RAS|DFII_COMMAND_CAS|DFII_COMMAND_WE|DFII_COMMAND_CS);
+#endif
+
 	ddrphy_wlevel_en_write(1);
 }
 
@@ -198,6 +205,13 @@ void sdrwloff(void)
 	sdram_dfii_pi0_address_write(DDRX_MR1);
 	sdram_dfii_pi0_baddress_write(1);
 	command_p0(DFII_COMMAND_RAS|DFII_COMMAND_CAS|DFII_COMMAND_WE|DFII_COMMAND_CS);
+
+#ifdef SDRAM_PHY_DDR4_RDIMM
+	sdram_dfii_pi0_address_write(DDRX_MR1 ^ 0x2BF8);
+	sdram_dfii_pi0_baddress_write(1 ^ 0xF);
+	command_p0(DFII_COMMAND_RAS|DFII_COMMAND_CAS|DFII_COMMAND_WE|DFII_COMMAND_CS);
+#endif
+
 	ddrphy_wlevel_en_write(0);
 }
 
@@ -514,7 +528,7 @@ static int read_level_scan(int module, int bitslip)
 	prv = 42;
 	for(p=0;p<SDRAM_PHY_PHASES;p++)
 		for(i=0;i<DFII_PIX_DATA_BYTES;i++) {
-			prv = 1664525*prv + 1013904223;
+			prv = lfsr(32, prv);
 			prs[p][i] = prv;
 		}
 
@@ -537,7 +551,7 @@ static int read_level_scan(int module, int bitslip)
 	sdram_dfii_pird_baddress_write(0);
 	score = 0;
 
-	printf("m%d, b%d: |", module, bitslip);
+	printf("m%d, b%02d: |", module, bitslip);
 	read_delay_rst(module);
 	for(i=0;i<SDRAM_PHY_DELAYS;i++) {
 		int working = 1;
@@ -594,7 +608,7 @@ static void read_level(int module)
 	prv = 42;
 	for(p=0;p<SDRAM_PHY_PHASES;p++)
 		for(i=0;i<DFII_PIX_DATA_BYTES;i++) {
-			prv = 1664525*prv + 1013904223;
+			prv = lfsr(32, prv);
 			prs[p][i] = prv;
 		}
 
@@ -712,7 +726,7 @@ static void read_level(int module)
 static unsigned int seed_to_data_32(unsigned int seed, int random)
 {
 	if (random)
-		return 1664525*seed + 1013904223;
+		return lfsr(32, seed);
 	else
 		return seed + 1;
 }
@@ -720,7 +734,7 @@ static unsigned int seed_to_data_32(unsigned int seed, int random)
 static unsigned short seed_to_data_16(unsigned short seed, int random)
 {
 	if (random)
-		return 25173*seed + 13849;
+		return lfsr(16, seed);
 	else
 		return seed + 1;
 }
@@ -794,14 +808,14 @@ static int memtest_data(void)
 	unsigned int rdata;
 
 	errors = 0;
-	seed_32 = 0;
+	seed_32 = 1;
 
 	for(i=0;i<MEMTEST_DATA_SIZE/4;i++) {
 		seed_32 = seed_to_data_32(seed_32, MEMTEST_DATA_RANDOM);
 		array[i] = seed_32;
 	}
 
-	seed_32 = 0;
+	seed_32 = 1;
 	flush_cpu_dcache();
 #ifdef CONFIG_L2_SIZE
 	flush_l2_cache();
@@ -834,14 +848,14 @@ static int memtest_addr(void)
 	unsigned short rdata;
 
 	errors = 0;
-	seed_16 = 0;
+	seed_16 = 1;
 
 	for(i=0;i<MEMTEST_ADDR_SIZE/4;i++) {
 		seed_16 = seed_to_data_16(seed_16, MEMTEST_ADDR_RANDOM);
 		array[(unsigned int) seed_16] = i;
 	}
 
-	seed_16 = 0;
+	seed_16 = 1;
 	flush_cpu_dcache();
 #ifdef CONFIG_L2_SIZE
 	flush_l2_cache();
@@ -902,7 +916,7 @@ static void memspeed(void)
 	end = timer0_value_read();
 	read_speed = (8*MEMTEST_DATA_SIZE*(CONFIG_CLOCK_FREQUENCY/1000000))/(start - end);
 
-	printf("Memspeed Writes: %dMbps Reads: %dMbps\n", write_speed, read_speed);
+	printf("Memspeed Writes: %ldMbps Reads: %ldMbps\n", write_speed, read_speed);
 }
 
 int memtest(void)
@@ -963,7 +977,7 @@ static void read_leveling(void)
 		}
 
 		/* select best read window */
-		printf("best: m%d, b%d ", module, best_bitslip);
+		printf("best: m%d, b%02d ", module, best_bitslip);
 		read_bitslip_rst(module);
 		for (bitslip=0; bitslip<best_bitslip; bitslip++)
 			read_bitslip_inc(module);

@@ -15,8 +15,8 @@ from litex.soc.cores.clock import *
 from litex.soc.integration.soc_core import *
 from litex.soc.integration.soc_sdram import *
 from litex.soc.integration.builder import *
+from litex.soc.cores.led import LedChaser
 from litex.soc.cores.i2s import *
-from litex.soc.cores import gpio
 
 from litedram.modules import MT41K128M16
 from litedram.phy import s7ddrphy
@@ -115,12 +115,12 @@ class BaseSoC(SoCCore):
                 pads       = self.platform.request("eth"))
             self.add_csr("ethphy")
             self.add_etherbone(phy=self.ethphy)
-        # gpio
-        port_led = []
-        for i in range(4):
-            port_led += [self.platform.request("user_led", i)]
-        self.submodules.port_led = gpio.GPIOOut(port_led)
-        self.add_csr("port_led")
+        
+        # Leds -------------------------------------------------------------------------------------
+        self.submodules.leds = LedChaser(
+            pads         = Cat(*[self.platform.request("user_led", i) for i in range(4)]),
+            sys_clk_freq = sys_clk_freq)
+        self.add_csr("leds")
 
 
 # SoundSoC --------------------------------------------------------------------------------------
@@ -164,6 +164,7 @@ class SoundSoC(BaseSoC):
         self.add_csr("i2s_tx")
         self.add_interrupt("i2s_tx")
 
+
 # Build --------------------------------------------------------------------------------------------
 
 def main():
@@ -185,7 +186,7 @@ def main():
 
     if args.load:
         prog = soc.platform.create_programmer()
-        prog.load_bitstream(os.path.join(builder.gateware_dir, "top.bit"))
+        prog.load_bitstream(os.path.join(builder.gateware_dir, soc.build_name + ".bit"))
 
 if __name__ == "__main__":
     main()

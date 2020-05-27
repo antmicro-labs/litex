@@ -73,6 +73,7 @@ _io = [
         Subsignal("data", Pins("C2 E1 F1 D2"), Misc("PULLUP True")),
         Subsignal("cmd",  Pins("C1"),          Misc("PULLUP True")),
         Subsignal("clk",  Pins("B1")),
+        Subsignal("cd",   Pins("A1")),
         Misc("SLEW=FAST"),
         IOStandard("LVCMOS33"),
     ),
@@ -132,7 +133,7 @@ class Platform(XilinxPlatform):
         self.add_platform_command("set_property INTERNAL_VREF 0.750 [get_iobanks 34]")
 
     def create_programmer(self):
-        return OpenOCD("openocd_xilinx_xc7.cfg", "bscan_spi_xc7a100t.bit")
+        return OpenOCD("openocd_xc7_ft2232.cfg", "bscan_spi_xc7a100t.bit")
 
     def do_finalize(self, fragment):
         XilinxPlatform.do_finalize(self, fragment)

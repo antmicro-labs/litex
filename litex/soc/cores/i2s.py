@@ -27,6 +27,7 @@ class S7I2S(Module, AutoCSR, AutoDoc):
         Tx and Rx interfaces are inferred based upon the presence or absence of the respective pins in the "pads" argument.
         
         When device is configured as master you can manipulate LRCK and SCLK signals using below variables.
+        
         - lrck_ref_freq - is a reference signal that is required to achive desired LRCK and SCLK frequencies.
                          Have be the same as your sys_clk.
         - lrck_freq - this variable defines requested LRCK frequency. Mind you, that based on sys_clk frequency, 
@@ -40,6 +41,7 @@ class S7I2S(Module, AutoCSR, AutoDoc):
         frequencies for audio sampling rates.
 
         I2S core supports two formats: standard and left-justified.
+        
         - Standard format requires a device to receive and send data with one bit offset for both channels. 
             Left channel begins with low signal on LRCK.
         - Left justified format requires from device to receive and send data without any bit offset for both channels.
@@ -141,7 +143,6 @@ class S7I2S(Module, AutoCSR, AutoDoc):
                 concatenate_channels = False
                 print("I2S warning: sample width greater than 16 bits. your channels can't be glued")
 
-
         sync_pin = Signal()
         self.specials += MultiReg(pads.sync, sync_pin)
 
@@ -236,7 +237,7 @@ class S7I2S(Module, AutoCSR, AutoDoc):
                 ])
             self.rx_conf = CSRStatus(description="Rx configuration",
                 fields=[
-                    CSRField("format", size=2, reset=frame_format.value, description="I2S smaple format"),
+                    CSRField("format", size=2, reset=frame_format.value, description="I2S sample format. {} is left-justified, {} is I2S standard".format(I2S_FORMAT.I2S_LEFT_JUSTIFIED, I2S_FORMAT.I2S_STANDARD)),
                     CSRField("sample_width", size=6, reset=sample_width, description="Single sample width"),
                     CSRField("lrck_freq", size=24, reset=lrck_freq, description="Audio sampling rate frequency"),
                 ])
@@ -468,7 +469,7 @@ class S7I2S(Module, AutoCSR, AutoDoc):
                 ])
             self.tx_conf = CSRStatus(description="TX configuration",
                 fields=[
-                    CSRField("format", size=2, reset=frame_format.value, description="I2S smaple format"),
+                    CSRField("format", size=2, reset=frame_format.value, description="I2S sample format. {} is left-justified, {} is I2S standard".format(I2S_FORMAT.I2S_LEFT_JUSTIFIED, I2S_FORMAT.I2S_STANDARD)),
                     CSRField("sample_width", size=6, reset=sample_width, description="Single sample width"),
                     CSRField("lrck_freq", size=24, reset=lrck_freq, description="Audio sampling rate frequency"),
                 ])
@@ -549,6 +550,7 @@ class S7I2S(Module, AutoCSR, AutoDoc):
             tx_cnt_width = math.ceil(math.log(fifo_data_width,2))
             tx_cnt = Signal(tx_cnt_width)
             tx_buf = Signal(tx_buf_width)
+            sample_msb = fifo_data_width - 1
             self.submodules.txi2s = txi2s = FSM(reset_state="IDLE")
             txi2s.act("IDLE",
                 If(self.tx_ctl.fields.enable,
@@ -569,7 +571,7 @@ class S7I2S(Module, AutoCSR, AutoDoc):
                 If(~self.tx_ctl.fields.enable,
                     NextState("IDLE")
                 ).Else(
-                    NextValue(tx_pin, tx_buf[sample_width - 1]),
+                    NextValue(tx_pin, tx_buf[sample_msb]),
                     NextValue(tx_buf, Cat(0, tx_buf[:-1])),
                     NextValue(tx_cnt, tx_cnt - 1),
                     NextState("LEFT_WAIT")
@@ -620,7 +622,7 @@ class S7I2S(Module, AutoCSR, AutoDoc):
                 If(~self.tx_ctl.fields.enable,
                     NextState("IDLE")
                 ).Else(
-                    NextValue(tx_pin, tx_buf[sample_width-1]),
+                    NextValue(tx_pin, tx_buf[sample_msb]),
                     NextValue(tx_buf, Cat(0, tx_buf[:-1])),
                     NextValue(tx_cnt, tx_cnt - 1),
                     NextState("RIGHT_WAIT")

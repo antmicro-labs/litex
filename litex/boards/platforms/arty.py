@@ -159,6 +159,16 @@ _io = [
     ),
 ]
 
+_sdcard_pmod_io = [ # https://store.digilentinc.com/pmod-microsd-microsd-card-slot/
+    ("sdcard", 0,
+        Subsignal("data", Pins("D15 J17 J18 E15")),
+        Subsignal("cmd", Pins("E16")),
+        Subsignal("clk", Pins("C15")),
+        Subsignal("cd", Pins("K15")),
+        IOStandard("LVCMOS33"), Misc("SLEW=FAST")
+    ),
+]
+
 # Connectors ---------------------------------------------------------------------------------------
 
 _connectors = [
@@ -273,7 +283,7 @@ class Platform(XilinxPlatform):
 
     def create_programmer(self):
         bscan_spi = "bscan_spi_xc7a100t.bit" if "xc7a100t" in self.device else "bscan_spi_xc7a35t.bit"
-        return OpenOCD("openocd_xilinx_xc7.cfg", bscan_spi)
+        return OpenOCD("openocd_xc7_ft2232.cfg", bscan_spi)
 
     def do_finalize(self, fragment):
         XilinxPlatform.do_finalize(self, fragment)

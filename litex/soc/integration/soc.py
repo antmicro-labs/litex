@@ -22,10 +22,6 @@ from litex.soc.interconnect import wishbone
 from litex.soc.interconnect import wishbone2csr
 from litex.soc.interconnect import axi
 
-# TODO:
-# - replace raise with exit on logging error.
-# - cleanup SoCCSRRegion
-
 logging.basicConfig(level=logging.INFO)
 
 # Helpers ------------------------------------------------------------------------------------------
@@ -282,7 +278,8 @@ class SoCBusHandler(Module):
         return is_io
 
     # Add Master/Slave -----------------------------------------------------------------------------
-    def add_adapter(self, name, interface):
+    def add_adapter(self, name, interface, direction="m2s"):
+        assert direction in ["m2s", "s2m"]
         if interface.data_width != self.data_width:
             self.logger.info("{} Bus {} from {}-bit to {}-bit.".format(
                 colorer(name),
@@ -290,7 +287,11 @@ class SoCBusHandler(Module):
                 colorer(interface.data_width),
                 colorer(self.data_width)))
             new_interface = wishbone.Interface(data_width=self.data_width)
-            self.submodules += wishbone.Converter(interface, new_interface)
+            if direction == "m2s":
+                converter = wishbone.Converter(master=interface, slave=new_interface)
+            if direction == "s2m":
+                converter = wishbone.Converter(master=new_interface, slave=interface)
+            self.submodules += converter
             return new_interface
         else:
             return interface
@@ -304,7 +305,7 @@ class SoCBusHandler(Module):
                 colorer("already declared", color="red")))
             self.logger.error(self)
             raise
-        master = self.add_adapter(name, master)
+        master = self.add_adapter(name, master, "m2s")
         self.masters[name] = master
         self.logger.info("{} {} as Bus Master.".format(
             colorer(name,    color="underline"),
@@ -336,7 +337,7 @@ class SoCBusHandler(Module):
                 colorer("already declared", color="red")))
             self.logger.error(self)
             raise
-        slave = self.add_adapter(name, slave)
+        slave = self.add_adapter(name, slave, "s2m")
         self.slaves[name] = slave
         self.logger.info("{} {} as Bus Slave.".format(
             colorer(name, color="underline"),
@@ -606,30 +607,38 @@ class SoCIRQHandler(SoCLocHandler):
 # SoCController ------------------------------------------------------------------------------------
 
 class SoCController(Module, AutoCSR):
-    def __init__(self):
-        self._reset      = CSRStorage(1, description="""
-            Write a ``1`` to this register to reset the SoC.""")
-        self._scratch    = CSRStorage(32, reset=0x12345678, description="""
-            Use this register as a scratch space to verify that software read/write accesses
-            to the Wishbone/CSR bus are working correctly. The initial reset value of 0x1234578
-            can be used to verify endianness.""")
-        self._bus_errors = CSRStatus(32, description="""
-            Total number of Wishbone bus errors (timeouts) since last reset.""")
+    def __init__(self,
+        with_reset    = True,
+        with_scratch  = True,
+        with_errors   = True):
+
+        if with_reset:
+            self._reset = CSRStorage(1, description="""Write a ``1`` to this register to reset the SoC.""")
+        if with_scratch:
+            self._scratch = CSRStorage(32, reset=0x12345678, description="""
+                Use this register as a scratch space to verify that software read/write accesses
+                to the Wishbone/CSR bus are working correctly. The initial reset value of 0x1234578
+                can be used to verify endianness.""")
+        if with_errors:
+            self._bus_errors = CSRStatus(32, description="Total number of Wishbone bus errors (timeouts) since start.")
 
         # # #
 
         # Reset
-        self.reset = Signal()
-        self.comb += self.reset.eq(self._reset.re)
+        if with_reset:
+            self.reset = Signal()
+            self.comb += self.reset.eq(self._reset.re)
 
-        # Bus errors
-        self.bus_error = Signal()
-        bus_errors     = Signal(32)
-        self.sync += \
-            If(bus_errors != (2**len(bus_errors)-1),
-                If(self.bus_error, bus_errors.eq(bus_errors + 1))
-            )
-        self.comb += self._bus_errors.status.eq(bus_errors)
+        # Errors
+        if with_errors:
+            self.bus_error = Signal()
+            bus_errors     = Signal(32)
+            self.sync += [
+                If(bus_errors != (2**len(bus_errors)-1),
+                    If(self.bus_error, bus_errors.eq(bus_errors + 1))
+                )
+            ]
+            self.comb += self._bus_errors.status.eq(bus_errors)
 
 # SoC ----------------------------------------------------------------------------------------------
 
@@ -731,9 +740,9 @@ class SoC(Module):
             self.add_constant(name, value)
 
     # SoC Main Components --------------------------------------------------------------------------
-    def add_controller(self, name="ctrl"):
+    def add_controller(self, name="ctrl", **kwargs):
         self.check_if_exists(name)
-        setattr(self.submodules, name, SoCController())
+        setattr(self.submodules, name, SoCController(**kwargs))
         self.csr.add(name, use_loc_if_exists=True)
 
     def add_ram(self, name, origin, size, contents=[], mode="rw"):
@@ -753,8 +762,8 @@ class SoC(Module):
     def add_csr_bridge(self, origin):
         self.submodules.csr_bridge = wishbone2csr.WB2CSR(
             bus_csr       = csr_bus.Interface(
-            address_width = self.csr.address_width,
-            data_width    = self.csr.data_width))
+                address_width = self.csr.address_width,
+                data_width    = self.csr.data_width))
         csr_size   = 2**(self.csr.address_width + 2)
         csr_region = SoCRegion(origin=origin, size=csr_size, cached=False)
         self.bus.add_slave("csr", self.csr_bridge.wishbone, csr_region)
@@ -764,21 +773,27 @@ class SoC(Module):
 
     def add_cpu(self, name="vexriscv", variant="standard", cls=None, reset_address=None):
         if name not in cpu.CPUS.keys():
-            self.logger.error("{} CPU {}, supporteds: {}".format(
+            self.logger.error("{} CPU {}, supporteds: {}.".format(
                 colorer(name),
                 colorer("not supported", color="red"),
                 colorer(", ".join(cpu.CPUS.keys()))))
             raise
         # Add CPU
         cpu_cls = cls if cls is not None else cpu.CPUS[name]
+        if variant not in cpu_cls.variants:
+            self.logger.error("{} CPU variant {}, supporteds: {}.".format(
+                colorer(variant),
+                colorer("not supported", color="red"),
+                colorer(", ".join(cpu_cls.variants))))
+            raise
         self.submodules.cpu = cpu_cls(self.platform, variant)
         # Update SoC with CPU constraints
         for n, (origin, size) in enumerate(self.cpu.io_regions.items()):
             self.bus.add_region("io{}".format(n), SoCIORegion(origin=origin, size=size, cached=False))
         self.mem_map.update(self.cpu.mem_map) # FIXME
-        self.csr.update_alignment(self.cpu.data_width)
         # Add Bus Masters/CSR/IRQs
         if not isinstance(self.cpu, cpu.CPUNone):
+            self.csr.update_alignment(self.cpu.data_width)
             if reset_address is None:
                 reset_address = self.mem_map["rom"]
             self.cpu.set_reset_address(reset_address)
@@ -789,8 +804,11 @@ class SoC(Module):
                 for name, loc in self.cpu.interrupts.items():
                     self.irq.add(name, loc)
                 self.add_config("CPU_HAS_INTERRUPT")
+
+
             if hasattr(self, "ctrl"):
-                self.comb += self.cpu.reset.eq(self.ctrl.reset)
+                if hasattr(self.ctrl, "reset"):
+                    self.comb += self.cpu.reset.eq(self.ctrl.reset)
             self.add_config("CPU_RESET_ADDR", reset_address)
         # Add constants
         self.add_config("CPU_TYPE",    str(name))
@@ -817,16 +835,28 @@ class SoC(Module):
         self.logger.info(colorer("-"*80, color="bright"))
 
         # SoC Bus Interconnect ---------------------------------------------------------------------
-        bus_masters = self.bus.masters.values()
-        bus_slaves  = [(self.bus.regions[n].decoder(self.bus), s) for n, s in self.bus.slaves.items()]
-        if len(bus_masters) and len(bus_slaves):
-            self.submodules.bus_interconnect = wishbone.InterconnectShared(
-                masters        = bus_masters,
-                slaves         = bus_slaves,
-                register       = True,
-                timeout_cycles = self.bus.timeout)
-            if hasattr(self, "ctrl") and self.bus.timeout is not None:
-                self.comb += self.ctrl.bus_error.eq(self.bus_interconnect.timeout.error)
+        if len(self.bus.masters) and len(self.bus.slaves):
+            # If 1 bus_master, 1 bus_slave and no address translation, use InterconnectPointToPoint.
+            if ((len(self.bus.masters) == 1)  and
+                (len(self.bus.slaves)  == 1)  and
+                (next(iter(self.bus.regions.values())).origin == 0)):
+                self.submodules.bus_interconnect = wishbone.InterconnectPointToPoint(
+                    master = next(iter(self.bus.masters.values())),
+                    slave  = next(iter(self.bus.slaves.values())))
+            # Otherwise, use InterconnectShared.
+            else:
+                self.submodules.bus_interconnect = wishbone.InterconnectShared(
+                    masters        = self.bus.masters.values(),
+                    slaves         = [(self.bus.regions[n].decoder(self.bus), s) for n, s in self.bus.slaves.items()],
+                    register       = True,
+                    timeout_cycles = self.bus.timeout)
+                if hasattr(self, "ctrl") and self.bus.timeout is not None:
+                    if hasattr(self.ctrl, "bus_error"):
+                        self.comb += self.ctrl.bus_error.eq(self.bus_interconnect.timeout.error)
+            self.bus.logger.info("Interconnect: {} ({} <-> {}).".format(
+                colorer(self.bus_interconnect.__class__.__name__),
+                colorer(len(self.bus.masters)),
+                colorer(len(self.bus.slaves))))
 
         # SoC CSR Interconnect ---------------------------------------------------------------------
         self.submodules.csr_bankarray = csr_bus.CSRBankArray(self,
@@ -903,6 +933,8 @@ class SoC(Module):
 
     # SoC build ------------------------------------------------------------------------------------
     def build(self, *args, **kwargs):
+        self.build_name = kwargs.pop("build_name", self.platform.name)
+        kwargs.update({"build_name": self.build_name})
         return self.platform.build(self, *args, **kwargs)
 
 # LiteXSoC -----------------------------------------------------------------------------------------
@@ -926,13 +958,9 @@ class LiteXSoC(SoC):
             if name == "stub":
                 self.comb += self.uart.sink.ready.eq(1)
 
-        # Bridge
-        elif name in ["bridge"]:
-            self.submodules.uart = uart.UARTWishboneBridge(
-                pads     = self.platform.request("serial"),
-                clk_freq = self.sys_clk_freq,
-                baudrate = baudrate)
-            self.bus.add_master(name="uart_bridge", master=self.uart.wishbone)
+        # UARTBone / Bridge
+        elif name in ["uartbone", "bridge"]:
+            self.add_uartbone(baudrate=baudrate)
 
         # Crossover
         elif name in ["crossover"]:
@@ -986,8 +1014,17 @@ class LiteXSoC(SoC):
         else:
             self.add_constant("UART_POLLING")
 
+    # Add UARTbone ---------------------------------------------------------------------------------
+    def add_uartbone(self, name="serial", baudrate=115200):
+        from litex.soc.cores import uart
+        self.submodules.uartbone = uart.UARTBone(
+            pads     = self.platform.request(name),
+            clk_freq = self.sys_clk_freq,
+            baudrate = baudrate)
+        self.bus.add_master(name="uartbone", master=self.uartbone.wishbone)
+
     # Add SDRAM ------------------------------------------------------------------------------------
-    def add_sdram(self, name, phy, module, origin, size=None,
+    def add_sdram(self, name, phy, module, origin, size=None, with_soc_interconnect=True,
         l2_cache_size           = 8192,
         l2_cache_min_data_width = 128,
         l2_cache_reverse        = True,
@@ -1008,6 +1045,8 @@ class LiteXSoC(SoC):
             clk_freq        = self.sys_clk_freq,
             **kwargs)
         self.csr.add("sdram")
+
+        if not with_soc_interconnect: return
 
         # Compute/Check SDRAM size
         sdram_size = 2**(module.geom_settings.bankbits +
@@ -1133,7 +1172,7 @@ class LiteXSoC(SoC):
             eth_tx_clk)
 
     # Add Etherbone --------------------------------------------------------------------------------
-    def add_etherbone(self, name="etherbone", phy=None,
+    def add_etherbone(self, name="etherbone", phy=None, clock_domain=None,
         mac_address = 0x10e2d5000000,
         ip_address  = "192.168.1.50",
         udp_port    = 1234):
@@ -1146,9 +1185,21 @@ class LiteXSoC(SoC):
             mac_address = mac_address,
             ip_address  = ip_address,
             clk_freq    = self.clk_freq)
+        if clock_domain is not None: # FIXME: Could probably be avoided.
+            ethcore = ClockDomainsRenamer("eth_tx")(ethcore)
         self.submodules += ethcore
+
+        # Clock domain renaming
+        if clock_domain is not None: # FIXME: Could probably be avoided.
+            self.clock_domains.cd_etherbone = ClockDomain("etherbone")
+            self.comb += self.cd_etherbone.clk.eq(ClockSignal(clock_domain))
+            self.comb += self.cd_etherbone.rst.eq(ResetSignal(clock_domain))
+            clock_domain = "etherbone"
+        else:
+            clock_domain = "sys"
+
         # Etherbone
-        etherbone = LiteEthEtherbone(ethcore.udp, udp_port)
+        etherbone = LiteEthEtherbone(ethcore.udp, udp_port, cd=clock_domain)
         setattr(self.submodules, name, etherbone)
         self.add_wb_master(etherbone.wishbone.bus)
         # Timing constraints
@@ -1168,10 +1219,10 @@ class LiteXSoC(SoC):
     # Add SPI Flash --------------------------------------------------------------------------------
     def add_spi_flash(self, name="spiflash", mode="4x", dummy_cycles=None, clk_freq=None):
         assert dummy_cycles is not None                 # FIXME: Get dummy_cycles from SPI Flash
-        assert mode in ["4x"]                           # FIXME: Add 1x support.
+        assert mode in ["1x", "4x"]
         if clk_freq is None: clk_freq = self.clk_freq/2 # FIXME: Get max clk_freq from SPI Flash
         spiflash = SpiFlash(
-            pads         = self.platform.request(name + mode),
+            pads         = self.platform.request(name if mode == "1x" else name + mode),
             dummy        = dummy_cycles,
             div          = ceil(self.clk_freq/clk_freq),
             with_bitbang = True,
